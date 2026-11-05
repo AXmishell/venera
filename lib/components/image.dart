@@ -326,6 +326,13 @@ class _AnimatedImageState extends State<AnimatedImage>
       result = const Center();
     }
 
+    // Cached images resolve synchronously. Skipping the switcher in that case
+    // avoids starting a 200ms fade (and an extra composited layer) for every
+    // cover that scrolls into view.
+    if (_wasSynchronouslyLoaded) {
+      return result;
+    }
+
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 200),
       reverseDuration: const Duration(milliseconds: 200),

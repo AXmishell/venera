@@ -101,7 +101,7 @@ class NaviPaneState extends State<NaviPane>
   static const _kTopBarHeight = 48.0;
 
   double get bottomBarHeight =>
-      _kBottomBarHeight + MediaQuery.of(context).padding.bottom;
+      _kBottomBarHeight + MediaQuery.paddingOf(context).bottom;
 
   void onNavigatorStateChange() {
     onRebuild(context);
@@ -143,7 +143,7 @@ class NaviPaneState extends State<NaviPane>
   }
 
   double targetFormContext(BuildContext context) {
-    var width = MediaQuery.of(context).size.width;
+    var width = MediaQuery.sizeOf(context).width;
     double target = 0;
     if (width > changePoint) {
       target = 2;
@@ -174,11 +174,18 @@ class NaviPaneState extends State<NaviPane>
   @override
   Widget build(BuildContext context) {
     onRebuild(context);
-    final mq = MediaQuery.of(context);
-    final sideInsets = (App.isMobile && mq.orientation == Orientation.landscape)
+    final sideInsets =
+        (App.isMobile &&
+            MediaQuery.orientationOf(context) == Orientation.landscape)
         ? EdgeInsets.only(
-            left: math.max(mq.viewPadding.left, mq.systemGestureInsets.left),
-            right: math.max(mq.viewPadding.right, mq.systemGestureInsets.right),
+            left: math.max(
+              MediaQuery.viewPaddingOf(context).left,
+              MediaQuery.systemGestureInsetsOf(context).left,
+            ),
+            right: math.max(
+              MediaQuery.viewPaddingOf(context).right,
+              MediaQuery.systemGestureInsetsOf(context).right,
+            ),
           )
         : EdgeInsets.zero;
     return _NaviPopScope(
@@ -192,6 +199,10 @@ class NaviPaneState extends State<NaviPane>
       popGesture: App.isIOS && context.width >= changePoint,
       child: AnimatedBuilder(
         animation: controller,
+        // The main view contains a Navigator and the active page. Building it
+        // once and reusing it as the AnimatedBuilder child keeps the whole
+        // page tree from being rebuilt on every animation tick.
+        child: buildMainView(),
         builder: (context, child) {
           final value = controller.value;
           Widget content = Stack(
@@ -207,7 +218,7 @@ class NaviPaneState extends State<NaviPane>
                     _kFoldedSideBarWidth * ((value - 1).clamp(0, 1)) +
                     (_kSideBarWidth - _kFoldedSideBarWidth) *
                         ((value - 2).clamp(0, 1)),
-                child: buildMainView(),
+                child: child!,
               ),
             ],
           );
@@ -472,12 +483,6 @@ class _SingleBottomNaviWidgetState extends State<_SingleBottomNaviWidget>
   bool isHovering = false;
 
   @override
-  void dispose() {
-    controller.dispose();
-    super.dispose();
-  }
-
-  @override
   void didUpdateWidget(covariant _SingleBottomNaviWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.enabled != widget.enabled) {
@@ -489,6 +494,8 @@ class _SingleBottomNaviWidgetState extends State<_SingleBottomNaviWidget>
     }
   }
 
+  late final CurvedAnimation curve;
+
   @override
   void initState() {
     super.initState();
@@ -497,29 +504,35 @@ class _SingleBottomNaviWidgetState extends State<_SingleBottomNaviWidget>
       vsync: this,
       duration: _fastAnimationDuration,
     );
+    curve = CurvedAnimation(parent: controller, curve: Curves.ease);
+  }
+
+  @override
+  void dispose() {
+    curve.dispose();
+    controller.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: CurvedAnimation(parent: controller, curve: Curves.ease),
-      builder: (context, child) {
-        return MouseRegion(
-          cursor: SystemMouseCursors.click,
-          onEnter: (details) => setState(() => isHovering = true),
-          onExit: (details) => setState(() => isHovering = false),
-          child: GestureDetector(
-            behavior: HitTestBehavior.translucent,
-            onTap: widget.onTap,
-            child: buildContent(),
-          ),
-        );
-      },
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (details) => setState(() => isHovering = true),
+      onExit: (details) => setState(() => isHovering = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: widget.onTap,
+        child: AnimatedBuilder(
+          animation: curve,
+          builder: (context, child) => buildContent(),
+        ),
+      ),
     );
   }
 
   Widget buildContent() {
-    final value = controller.value;
+    final value = curve.value;
     final colorScheme = Theme.of(context).colorScheme;
     final icon = Icon(
       widget.enabled ? widget.entry.activeIcon : widget.entry.icon,
@@ -660,8 +673,26 @@ class _NaviMainView extends StatefulWidget {
 class _NaviMainViewState extends State<_NaviMainView> {
   NaviPaneState get state => widget.state;
 
+  /// Whether the compact layout (top/bottom bars) is active.
+  ///
+  /// [_NaviMainView] is no longer rebuilt on every frame of the sidebar
+  /// animation, so listen for the layout breakpoint instead of reading the
+  /// controller value during build.
+  late bool _shouldShowAppBar;
+
+  void _onControllerChanged() {
+    final show = state.controller.value < 2;
+    if (show != _shouldShowAppBar && mounted) {
+      setState(() {
+        _shouldShowAppBar = show;
+      });
+    }
+  }
+
   @override
   void initState() {
+    _shouldShowAppBar = state.controller.value < 2;
+    state.controller.addListener(_onControllerChanged);
     state.mainViewUpdateHandler = () {
       setState(() {});
     };
@@ -669,8 +700,15 @@ class _NaviMainViewState extends State<_NaviMainView> {
   }
 
   @override
+  void dispose() {
+    state.controller.removeListener(_onControllerChanged);
+    state.mainViewUpdateHandler = null;
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    var shouldShowAppBar = state.controller.value < 2;
+    var shouldShowAppBar = _shouldShowAppBar;
     return Column(
       children: [
         if (shouldShowAppBar) state.buildTop().paddingTop(context.padding.top),

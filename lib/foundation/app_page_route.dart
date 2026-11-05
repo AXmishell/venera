@@ -458,12 +458,14 @@ class SlidePageTransitionBuilder extends PageTransitionsBuilder {
       Animation<double> animation,
       Animation<double> secondaryAnimation,
       Widget child) {
+    // Prefer animation.drive over constructing a new CurvedAnimation on every
+    // transition build; CurvedAnimation owns listeners and must be disposed.
     final Animation<double> primaryAnimation = App.isIOS
         ? animation
-        : CurvedAnimation(parent: animation, curve: Curves.ease);
+        : animation.drive(CurveTween(curve: Curves.ease));
     final Animation<double> secondaryCurve = App.isIOS
         ? secondaryAnimation
-        : CurvedAnimation(parent: secondaryAnimation, curve: Curves.ease);
+        : secondaryAnimation.drive(CurveTween(curve: Curves.ease));
 
     return SlideTransition(
       position: Tween<Offset>(
@@ -475,11 +477,10 @@ class SlidePageTransitionBuilder extends PageTransitionsBuilder {
           begin: Offset.zero,
           end: const Offset(-0.4, 0),
         ).animate(secondaryCurve),
-        child: PhysicalModel(
-          color: Colors.transparent,
-          borderRadius: BorderRadius.zero,
-          clipBehavior: Clip.hardEdge,
-          elevation: 6,
+        // PhysicalModel adds a saveLayer + shadow for the whole page on every
+        // frame of the transition. A repaint boundary keeps the page content
+        // cached so only the transform changes while it slides.
+        child: RepaintBoundary(
           child: Material(child: child),
         ),
       ),

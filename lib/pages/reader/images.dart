@@ -675,6 +675,11 @@ class _ContinuousModeState extends State<_ContinuousMode>
   /// explicit chapter jump.
   int _initialScrollIndex = 0;
 
+  /// Last first-visible index for which images were prefetched. Position
+  /// updates fire on every scroll frame, but the set of images to prefetch
+  /// only changes when the first visible item changes.
+  int? _lastPrefetchIndex;
+
   int _listKey = 0;
 
   /// Generation counter used to discard asynchronous results after the window
@@ -813,7 +818,10 @@ class _ContinuousModeState extends State<_ContinuousMode>
     var location = _locateImage(first.index);
     if (location == null) return;
     _initialScrollIndex = first.index;
-    _prefetch(first.index);
+    if (_lastPrefetchIndex != first.index) {
+      _lastPrefetchIndex = first.index;
+      _prefetch(first.index);
+    }
     _enterSegment(location.segment, location.page);
     if (last.index >= _imageCount - _preLoadThreshold) {
       _ensureNextChapter();
@@ -1050,6 +1058,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
       _currentSegment++;
       _loadingPrev = false;
       _initialScrollIndex += segment.length;
+      _lastPrefetchIndex = null;
     });
     _restorePosition(position.index + segment.length, position.alignment);
   }
@@ -1178,6 +1187,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
         ..add(_ContinuousSegment(chapter, images));
       _currentSegment = 0;
       _initialScrollIndex = page - 1;
+      _lastPrefetchIndex = null;
       _listKey++;
       _loadingChapter = false;
     });
@@ -1340,16 +1350,26 @@ class _ContinuousModeState extends State<_ContinuousMode>
           context,
         );
 
-        return ColoredBox(
-          color: context.colorScheme.surface,
-          child: ComicImage(
-            filterQuality: FilterQuality.medium,
-            image: image,
-            width: width,
-            height: height,
-            fit: BoxFit.contain,
-            onInit: (state) => imageStates.add(state),
-            onDispose: (state) => imageStates.remove(state),
+        // Each image is isolated in its own layer so that scrolling, the
+        // page-number overlay or the top/bottom bars do not force the whole
+        // viewport to be re-rasterized.
+        return RepaintBoundary(
+          child: ColoredBox(
+            color: context.colorScheme.surface,
+            child: ComicImage(
+              // Medium quality resampling is expensive every frame while
+              // scrolling. Switch to high quality only when the image is
+              // zoomed and effectively static.
+              filterQuality: isZoomedIn
+                  ? FilterQuality.medium
+                  : FilterQuality.low,
+              image: image,
+              width: width,
+              height: height,
+              fit: BoxFit.contain,
+              onInit: (state) => imageStates.add(state),
+              onDispose: (state) => imageStates.remove(state),
+            ),
           ),
         );
       },

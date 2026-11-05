@@ -361,10 +361,10 @@ class _AppTabBarState extends State<AppTabBar> {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller.animation ?? _controller,
-      builder: buildTabBar,
-    );
+    // The tab bar itself (scroll view, layout callback, indicator) does not
+    // depend on the animation value. Only the per-tab text colour needs to
+    // follow the swipe, so keep that rebuild as small as possible.
+    return buildTabBar(context, null);
   }
 
   void _tabLayoutCallback(List<double> offsets, double itemHeight) {
@@ -461,14 +461,20 @@ class _AppTabBarState extends State<AppTabBar> {
         key: keys[i],
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: DefaultTextStyle(
-            style: DefaultTextStyle.of(context).style.copyWith(
-                  color: i == _controller.animation?.value.round()
-                      ? context.colorScheme.primary
-                      : context.colorScheme.onSurface,
-                  fontWeight: FontWeight.w500,
-                ),
+          child: AnimatedBuilder(
+            animation: _controller.animation ?? _controller,
             child: widget.tabs[i],
+            builder: (context, child) {
+              return DefaultTextStyle(
+                style: DefaultTextStyle.of(context).style.copyWith(
+                      color: i == _controller.animation?.value.round()
+                          ? context.colorScheme.primary
+                          : context.colorScheme.onSurface,
+                      fontWeight: FontWeight.w500,
+                    ),
+                child: child!,
+              );
+            },
           ),
         ),
       ),

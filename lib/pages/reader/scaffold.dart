@@ -115,7 +115,21 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
     }
     setState(() {
       _isOpen = !_isOpen;
+      // Moving a BackdropFilter forces the backdrop to be blurred again on
+      // every frame. Use the opaque surface while sliding and restore the
+      // blur once the bars settle.
+      _barsAnimating = true;
     });
+  }
+
+  bool _barsAnimating = false;
+
+  void _onBarsAnimationEnd() {
+    if (_barsAnimating && mounted) {
+      setState(() {
+        _barsAnimating = false;
+      });
+    }
   }
 
   bool? rotation;
@@ -130,9 +144,14 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
     return Stack(
       children: [
         Positioned.fill(
-          child: AbsorbPointer(
-            absorbing: context.reader.isPageAnimating,
-            child: widget.child,
+          // Keep the page/list in its own layer. Moving the top/bottom bars
+          // (which also run a BackdropFilter) then does not repaint the whole
+          // reader content every frame.
+          child: RepaintBoundary(
+            child: AbsorbPointer(
+              absorbing: context.reader.isPageAnimating,
+              child: widget.child,
+            ),
           ),
         ),
         if (appdata.settings['showPageNumberInReader'] == true && !isOnChapterCommentsPage)
@@ -151,15 +170,17 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
           left: 0,
           right: 0,
           height: kTopBarHeight + context.padding.top,
+          onEnd: _onBarsAnimationEnd,
           child: buildTop(),
         ),
         AnimatedPositioned(
           duration: const Duration(milliseconds: 180),
           bottom: _isOpen
               ? 0
-              : -(kBottomBarHeight + MediaQuery.of(context).padding.bottom),
+              : -(kBottomBarHeight + MediaQuery.paddingOf(context).bottom),
           left: 0,
           right: 0,
+          onEnd: _onBarsAnimationEnd,
           child: buildBottom(),
         ),
       ],
@@ -173,6 +194,7 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
       );
 
     return BlurEffect(
+      blur: _barsAnimating ? 0 : 15,
       child: Container(
         padding: EdgeInsets.only(top: context.padding.top),
         decoration: BoxDecoration(
@@ -553,6 +575,7 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
     );
 
     return BlurEffect(
+      blur: _barsAnimating ? 0 : 15,
       child: Container(
         decoration: BoxDecoration(
           color: context.colorScheme.surface.toOpacity(0.92),
