@@ -1,5 +1,6 @@
-# Due to my limited time and energy, this project is no longer maintained. Feel free to fork it.
-# 由于本人精力有限, 此项目已停止维护, 欢迎fork
+
+# 从上游verera 1.6.3分支开发
+# 增加了连续章节自动加载（不用再点击下一章了），优化流畅
 
 # venera
 [![flutter](https://img.shields.io/badge/flutter-3.41.4-blue)](https://flutter.dev/)
