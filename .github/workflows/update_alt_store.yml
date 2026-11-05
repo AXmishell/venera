@@ -16,10 +16,10 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.x'
 
@@ -30,7 +30,7 @@ jobs:
 
     - name: Record job start time
       id: job_start_time
-      run: echo "start_time=$(date +%s)" >> $GITHUB_OUTPUT
+      run: echo "start_time=$(date +%s)" >> "$GITHUB_OUTPUT"
 
     - name: Update AltStore source
       id: update_source
@@ -42,7 +42,7 @@ jobs:
         git config --global user.email 'action@github.com'
         git add alt_store.json
         if git diff --staged --quiet; then
-          echo "changes=false" >> $GITHUB_OUTPUT
+          echo "changes=false" >> "$GITHUB_OUTPUT"
         else
           # Create a new branch for the PR
           branch_name="update-altstore-$(date +%Y%m%d-%H%M%S)"
@@ -57,7 +57,7 @@ jobs:
           --head "$branch_name" \
           --base master
           
-          echo "changes=true" >> $GITHUB_OUTPUT
+          echo "changes=true" >> "$GITHUB_OUTPUT"
         fi
 
     - name: Calculate job duration
@@ -66,26 +66,28 @@ jobs:
       run: |
         end_time=$(date +%s)
         duration=$((end_time - ${{ steps.job_start_time.outputs.start_time }}))
-        echo "duration=$duration seconds" >> $GITHUB_OUTPUT
+        echo "duration=$duration seconds" >> "$GITHUB_OUTPUT"
 
     - name: Create job summary
       run: |
-        if [[ "${{ steps.update_source.outputs.changes }}" == "true" ]]; then
-          echo "## Update Altstore Source Summary 🚀" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Changes Detected and Applied" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "The alt_store.json file has been updated with the latest release information." >> $GITHUB_STEP_SUMMARY
-        else
-          echo "## Update Altstore Source Summary 🚀" >> $GITHUB_STEP_SUMMARY
-          echo "🔍 No Changes Detected" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "The alt_store.json file is up to date. No changes were necessary." >> $GITHUB_STEP_SUMMARY
-        fi
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "🕐 Execution Time" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "This job took ${{ steps.duration.outputs.duration }} to complete." >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "📆 Next Scheduled Run" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "The next scheduled run will be tomorrow at midnight UTC." >> $GITHUB_STEP_SUMMARY
+        {
+          if [[ "${{ steps.update_source.outputs.changes }}" == "true" ]]; then
+            echo "## Update Altstore Source Summary 🚀"
+            echo "✅ Changes Detected and Applied"
+            echo ""
+            echo "The alt_store.json file has been updated with the latest release information."
+          else
+            echo "## Update Altstore Source Summary 🚀"
+            echo "🔍 No Changes Detected"
+            echo ""
+            echo "The alt_store.json file is up to date. No changes were necessary."
+          fi
+          echo ""
+          echo "🕐 Execution Time"
+          echo ""
+          echo "This job took ${{ steps.duration.outputs.duration }} to complete."
+          echo ""
+          echo "📆 Trigger"
+          echo ""
+          echo "This workflow runs after a successful Build ALL or manually."
+        } >> "$GITHUB_STEP_SUMMARY"

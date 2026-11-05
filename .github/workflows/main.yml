@@ -12,7 +12,7 @@ jobs:
   Build_MacOS:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
           channel: "stable"
@@ -49,7 +49,7 @@ jobs:
         run: |
           APP_VERSION=$(grep "version:" pubspec.yaml | cut -d':' -f2 | tr -d ' ')
           mkdir -p result
-          mv dist/venera.dmg result/venera-$APP_VERSION.dmg
+          mv dist/venera.dmg "result/venera-${APP_VERSION}.dmg"
 
       # Step 4: Attach and upload artifacts (optional)
       - name: Upload DMG
@@ -60,7 +60,7 @@ jobs:
   Build_IOS:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
           channel: "stable"
@@ -79,7 +79,7 @@ jobs:
         run: |
           APP_VERSION=$(grep "version:" pubspec.yaml | cut -d':' -f2 | tr -d ' ')
           mkdir -p result
-          mv build/ios/iphoneos/venera-ios.ipa result/venera-ios-$APP_VERSION.ipa
+          mv build/ios/iphoneos/venera-ios.ipa "result/venera-ios-${APP_VERSION}.ipa"
       - uses: actions/upload-artifact@v4
         with:
           name: ios_build
@@ -87,7 +87,7 @@ jobs:
   Build_Android:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: rm -rf /opt/hostedtoolcache
       - uses: subosito/flutter-action@v2
         with:
@@ -116,7 +116,7 @@ jobs:
   Build_Windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: install dependencies
         run: | 
           choco install yq -y
