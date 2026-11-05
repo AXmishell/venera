@@ -219,6 +219,7 @@ class Settings with ChangeNotifier {
     'autoAddLanguageFilter': 'none', // none, chinese, english, japanese
     'comicSourceListUrl': _defaultSourceListUrl,
     'preloadImageCount': 4,
+    'continuousAutoLoadNextChapter': true,
     'followUpdatesFolder': null,
     'initialPage': '0',
     'comicListDisplayMode': 'paging', // paging, continuous

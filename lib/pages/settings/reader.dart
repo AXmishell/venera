@@ -83,11 +83,26 @@ class _ReaderSettingsState extends State<ReaderSettings> {
     widget.onChanged?.call("showChapterComments");
   }
 
+  String get _effectiveReaderMode {
+    final comicId = widget.comicId;
+    final sourceKey = widget.comicSource;
+    if (comicId != null && sourceKey != null) {
+      return appdata.settings.getReaderSetting(comicId, sourceKey, 'readerMode')
+              as String? ??
+          'galleryLeftToRight';
+    }
+    return (appdata.settings.getDeviceReaderSetting('readerMode') ??
+                appdata.settings['readerMode'])
+            as String? ??
+        'galleryLeftToRight';
+  }
+
   @override
   Widget build(BuildContext context) {
     final comicId = widget.comicId;
     final sourceKey = widget.comicSource;
     final key = "$comicId@$sourceKey";
+    final readerMode = _effectiveReaderMode;
 
     bool isEnabledSpecificSettings =
         comicId != null &&
@@ -204,8 +219,8 @@ class _ReaderSettingsState extends State<ReaderSettings> {
           },
           onChanged: () {
             setState(() {});
-            var readerMode = appdata.settings['readerMode'];
-            if (readerMode?.toLowerCase().startsWith('continuous') ?? false) {
+            var readerMode = _effectiveReaderMode;
+            if (readerMode.toLowerCase().startsWith('continuous')) {
               appdata.settings['readerScreenPicNumberForLandscape'] = 1;
               widget.onChanged?.call('readerScreenPicNumberForLandscape');
               appdata.settings['readerScreenPicNumberForPortrait'] = 1;
@@ -232,7 +247,7 @@ class _ReaderSettingsState extends State<ReaderSettings> {
           useDeviceSettings: useDeviceSpecificSettings,
         ).toSliver(),
         SliverAnimatedVisibility(
-          visible: appdata.settings['readerMode']!.startsWith('gallery'),
+          visible: readerMode.startsWith('gallery'),
           child: _SliderSetting(
             title:
                 "The number of pic in screen for landscape (Only Gallery Mode)"
@@ -251,7 +266,7 @@ class _ReaderSettingsState extends State<ReaderSettings> {
           ),
         ),
         SliverAnimatedVisibility(
-          visible: appdata.settings['readerMode']!.startsWith('gallery'),
+          visible: readerMode.startsWith('gallery'),
           child: _SliderSetting(
             title:
                 "The number of pic in screen for portrait (Only Gallery Mode)"
@@ -270,7 +285,7 @@ class _ReaderSettingsState extends State<ReaderSettings> {
         ),
         SliverAnimatedVisibility(
           visible:
-              appdata.settings['readerMode']!.startsWith('gallery') &&
+              readerMode.startsWith('gallery') &&
               (appdata.settings['readerScreenPicNumberForLandscape'] > 1 ||
                   appdata.settings['readerScreenPicNumberForPortrait'] > 1),
           child: _SwitchSetting(
@@ -285,7 +300,7 @@ class _ReaderSettingsState extends State<ReaderSettings> {
           ),
         ),
         SliverAnimatedVisibility(
-          visible: appdata.settings['readerMode']!.startsWith('continuous'),
+          visible: readerMode.startsWith('continuous'),
           child: _SliderSetting(
             title: "Mouse scroll speed".tl,
             settingsIndex: "readerScrollSpeed",
@@ -294,6 +309,20 @@ class _ReaderSettingsState extends State<ReaderSettings> {
             max: 3,
             onChanged: () {
               widget.onChanged?.call("readerScrollSpeed");
+            },
+            comicId: isEnabledSpecificSettings ? widget.comicId : null,
+            comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
+            useDeviceSettings: useDeviceSpecificSettings,
+          ),
+        ),
+        SliverAnimatedVisibility(
+          visible: readerMode.startsWith('continuous'),
+          child: _SwitchSetting(
+            title: "Continuous mode auto-load next chapter".tl,
+            subtitle: "Automatically load the next chapter while scrolling".tl,
+            settingKey: "continuousAutoLoadNextChapter",
+            onChanged: () {
+              widget.onChanged?.call("continuousAutoLoadNextChapter");
             },
             comicId: isEnabledSpecificSettings ? widget.comicId : null,
             comicSource: isEnabledSpecificSettings ? widget.comicSource : null,

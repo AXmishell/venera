@@ -38,58 +38,28 @@ class _ReaderImagesState extends State<_ReaderImages> {
   void load() async {
     if (inProgress) return;
     inProgress = true;
-    if (reader.type == ComicType.local ||
-        (LocalManager().isDownloaded(
-          reader.cid,
-          reader.type,
-          reader.chapter,
-          reader.widget.chapters,
-        ))) {
-      try {
-        var images = await LocalManager().getImages(
-          reader.cid,
-          reader.type,
-          reader.chapter,
-        );
-        setState(() {
-          reader.images = images;
-          reader.isLoading = false;
-          inProgress = false;
-          _handleJumpToLastPage();
-          Future.microtask(() {
-            reader.updateHistory();
-          });
-        });
-      } catch (e) {
-        setState(() {
-          error = e.toString();
-          reader.isLoading = false;
-          inProgress = false;
-        });
-      }
+    var loadingChapter = reader.chapter;
+    var res = await reader.loadChapterImages(loadingChapter);
+    if (!mounted || reader.chapter != loadingChapter) {
+      inProgress = false;
+      return;
+    }
+    if (res.error) {
+      setState(() {
+        error = res.errorMessage;
+        reader.isLoading = false;
+        inProgress = false;
+      });
     } else {
-      var cp = reader.widget.chapters?.ids.elementAtOrNull(reader.chapter - 1);
-      var res = await reader.type.comicSource!.loadComicPages!(
-        reader.widget.cid,
-        cp,
-      );
-      if (res.error) {
-        setState(() {
-          error = res.errorMessage;
-          reader.isLoading = false;
-          inProgress = false;
+      setState(() {
+        reader.images = res.data;
+        reader.isLoading = false;
+        inProgress = false;
+        _handleJumpToLastPage();
+        Future.microtask(() {
+          reader.updateHistory();
         });
-      } else {
-        setState(() {
-          reader.images = res.data;
-          reader.isLoading = false;
-          inProgress = false;
-          _handleJumpToLastPage();
-          Future.microtask(() {
-            reader.updateHistory();
-          });
-        });
-      }
+      });
     }
     context.readerScaffold.update();
   }
@@ -382,7 +352,8 @@ class _GalleryModeState extends State<_GalleryMode>
         },
         onPageChanged: (i) {
           if (i == 0) {
-            if (reader.isFirstChapterOfGroup || !reader.toPrevChapter(toLastPage: true)) {
+            if (reader.isFirstChapterOfGroup ||
+                !reader.toPrevChapter(toLastPage: true)) {
               controller.jumpToPage(1);
             }
           } else if (i == totalPages + 1) {
@@ -652,7 +623,14 @@ const Set<PointerDeviceKind> _kTouchLikeDeviceTypes = <PointerDeviceKind>{
   PointerDeviceKind.unknown,
 };
 
-const double _kChangeChapterOffset = 160;
+class _ContinuousSegment {
+  _ContinuousSegment(this.chapter, this.images);
+
+  final int chapter;
+  final List<String> images;
+
+  int get length => images.length;
+}
 
 class _ContinuousMode extends StatefulWidget {
   const _ContinuousMode({super.key});
@@ -664,6 +642,13 @@ class _ContinuousMode extends StatefulWidget {
 class _ContinuousModeState extends State<_ContinuousMode>
     implements _ImageViewController {
   late _ReaderState reader;
+
+  /// Unique id for this controller instance. It is part of the PageStorage
+  /// key so a new controller (for example after switching the reading
+  /// direction) never restores the old list's absolute item index.
+  static int _instanceCounter = 0;
+
+  late final int _instanceId = _instanceCounter++;
 
   var itemScrollController = ItemScrollController();
   var itemPositionsListener = ItemPositionsListener.create();
@@ -677,9 +662,34 @@ class _ContinuousModeState extends State<_ContinuousMode>
   var fingers = 0;
   bool disableScroll = false;
 
-  late List<bool> cached;
+  /// A sliding window of chapters. Consecutive chapters are stitched into one
+  /// list so scrolling never has to stop at a chapter boundary.
+  final List<_ContinuousSegment> _segments = [];
 
-  int get preCacheCount => appdata.settings["preloadImageCount"];
+  /// Keys of images that were already requested for pre-download.
+  final Set<String> _prefetched = {};
+
+  int _currentSegment = 0;
+
+  /// Used by [ScrollablePositionedList] when the list is rebuilt after an
+  /// explicit chapter jump.
+  int _initialScrollIndex = 0;
+
+  int _listKey = 0;
+
+  /// Generation counter used to discard asynchronous results after the window
+  /// was explicitly reset.
+  int _generation = 0;
+
+  bool _loadingNext = false;
+  bool _loadingPrev = false;
+  bool _loadingChapter = false;
+  bool _adjusting = false;
+
+  String? _chapterError;
+
+  DateTime? _nextRetryAt;
+  DateTime? _prevRetryAt;
 
   /// Whether the user was scrolling the page.
   /// The gesture detector has a delay to detect tap event.
@@ -688,6 +698,9 @@ class _ContinuousModeState extends State<_ContinuousMode>
 
   var imageStates = <State<ComicImage>>{};
 
+  bool isZoomedIn = false;
+  bool isLongPressing = false;
+
   void delayedSetIsScrolling(bool value) {
     Future.delayed(
       const Duration(milliseconds: 300),
@@ -695,44 +708,491 @@ class _ContinuousModeState extends State<_ContinuousMode>
     );
   }
 
-  bool prepareToPrevChapter = false;
-  bool prepareToNextChapter = false;
-  bool jumpToNextChapter = false;
-  bool jumpToPrevChapter = false;
+  int get preCacheCount => appdata.settings["preloadImageCount"];
 
-  bool isZoomedIn = false;
-  bool isLongPressing = false;
+  /// Start loading the next chapter when this many images are left. A little
+  /// extra lead time keeps the transition invisible on slow networks.
+  int get _preLoadThreshold => math.max(preCacheCount * 2, 6);
+
+  /// Whether the next chapter should be stitched into the list automatically.
+  bool get _autoLoadNextChapter =>
+      appdata.settings.getReaderSetting(
+        reader.cid,
+        reader.type.sourceKey,
+        'continuousAutoLoadNextChapter',
+      ) !=
+      false;
+
+  int get _imageCount {
+    var count = 0;
+    for (var segment in _segments) {
+      count += segment.length;
+    }
+    return count;
+  }
+
+  /// The list also contains one trailing placeholder while the next chapter is
+  /// loading.
+  int get _itemCount => _imageCount + (_loadingNext ? 1 : 0);
+
+  _ContinuousSegment? get _currentSegmentData {
+    if (_segments.isEmpty) return null;
+    var index = _currentSegment.clamp(0, _segments.length - 1).toInt();
+    return _segments[index];
+  }
+
+  int _indexOfImage(int segmentIndex, int page) {
+    var index = page - 1;
+    for (var i = 0; i < segmentIndex; i++) {
+      index += _segments[i].length;
+    }
+    return index;
+  }
+
+  ({int segment, int page})? _locateImage(int index) {
+    if (index < 0) return null;
+    var offset = 0;
+    for (var i = 0; i < _segments.length; i++) {
+      var segment = _segments[i];
+      if (index < offset + segment.length) {
+        return (segment: i, page: index - offset + 1);
+      }
+      offset += segment.length;
+    }
+    return null;
+  }
 
   @override
   void initState() {
+    super.initState();
     reader = context.reader;
     reader._imageViewController = this;
+    var images = reader.images;
+    if (images != null && images.isNotEmpty) {
+      _segments.add(_ContinuousSegment(reader.chapter, images));
+      var page = reader.page.clamp(1, images.length).toInt();
+      if (page != reader.page) {
+        reader._page = page;
+        reader.updateHistory();
+      }
+      _initialScrollIndex = page - 1;
+    }
     itemPositionsListener.itemPositions.addListener(onPositionChanged);
-    cached = List.filled(reader.maxPage + 2, false);
-    Future.delayed(
-      const Duration(milliseconds: 100),
-      () => cacheImages(reader.page),
-    );
-    super.initState();
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (!mounted) return;
+      context.readerScaffold.setFloatingButton(0);
+      _prefetch(_initialScrollIndex);
+      _ensureNeighbors();
+    });
   }
 
   @override
   void dispose() {
     itemPositionsListener.itemPositions.removeListener(onPositionChanged);
+    if (identical(reader._imageViewController, this)) {
+      reader._imageViewController = null;
+    }
     super.dispose();
   }
 
   void onPositionChanged() {
-    if (itemPositionsListener.itemPositions.value.isEmpty) {
+    if (_adjusting) return;
+    var positions =
+        itemPositionsListener.itemPositions.value
+            .where(
+              (position) => position.index >= 0 && position.index < _imageCount,
+            )
+            .toList()
+          ..sort((a, b) => a.index.compareTo(b.index));
+    if (positions.isEmpty) {
+      _ensureNeighbors();
       return;
     }
-    var page = itemPositionsListener.itemPositions.value.first.index;
-    page = page.clamp(1, reader.maxPage);
-    if (page != reader.page) {
-      reader.setPage(page);
-      context.readerScaffold.update();
+    var first = positions.first;
+    var last = positions.last;
+    var location = _locateImage(first.index);
+    if (location == null) return;
+    _initialScrollIndex = first.index;
+    _prefetch(first.index);
+    _enterSegment(location.segment, location.page);
+    if (last.index >= _imageCount - _preLoadThreshold) {
+      _ensureNextChapter();
     }
-    cacheImages(page);
+    if (first.index == 0) {
+      _ensurePrevChapter();
+    }
+  }
+
+  /// Move to the next image in the merged chapter window. Used by tap-to-turn
+  /// and volume keys so they can cross a chapter boundary without a reload.
+  bool toNextImage() {
+    if (_segments.isEmpty) return false;
+    var current = _indexOfImage(_currentSegment, reader.page);
+    var next = current + 1;
+    if (next >= _imageCount) return false;
+    return _jumpToImageIndex(
+      next,
+      animate: reader.enablePageAnimation(reader.cid, reader.type),
+    );
+  }
+
+  bool toPrevImage() {
+    if (_segments.isEmpty) return false;
+    var current = _indexOfImage(_currentSegment, reader.page);
+    var prev = current - 1;
+    if (prev < 0) return false;
+    return _jumpToImageIndex(
+      prev,
+      animate: reader.enablePageAnimation(reader.cid, reader.type),
+    );
+  }
+
+  bool _jumpToImageIndex(int index, {bool animate = false}) {
+    var location = _locateImage(index);
+    if (location == null || !itemScrollController.isAttached) return false;
+    _enterSegment(location.segment, location.page, trim: false);
+    _initialScrollIndex = index;
+    if (animate) {
+      itemScrollController.scrollTo(
+        index: index,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.ease,
+      );
+    } else {
+      itemScrollController.jumpTo(index: index);
+    }
+    return true;
+  }
+
+  /// Update the reader state to the chapter currently at the top/left of the
+  /// viewport. History, the app bar and the chapter list all read from here.
+  void _enterSegment(int segmentIndex, int page, {bool trim = true}) {
+    if (segmentIndex < 0 || segmentIndex >= _segments.length) return;
+    var segment = _segments[segmentIndex];
+    if (_currentSegment == segmentIndex &&
+        reader.chapter == segment.chapter &&
+        reader.page == page) {
+      if (trim) _trimSegments();
+      return;
+    }
+    _currentSegment = segmentIndex;
+    reader.chapter = segment.chapter;
+    reader.images = segment.images;
+    if (reader.page != page) {
+      reader.page = page;
+    } else {
+      reader.updateHistory();
+    }
+    context.readerScaffold.update();
+    if (trim) _trimSegments();
+  }
+
+  void _prefetch(int globalIndex) {
+    // Prefetch in both directions: while reading forward this warms up the
+    // upcoming images, while scrolling back it also warms up the images just
+    // above the viewport.
+    var start = math.max(0, globalIndex - 2);
+    var end = globalIndex + preCacheCount;
+    for (var i = start; i <= end; i++) {
+      var location = _locateImage(i);
+      if (location == null) continue;
+      var segment = _segments[location.segment];
+      var key = '${segment.chapter}:${location.page}';
+      if (!_prefetched.add(key)) continue;
+      _preDownloadImageForChapter(
+        segment.chapter,
+        location.page,
+        segment.images[location.page - 1],
+      );
+    }
+  }
+
+  void _preDownloadImageForChapter(int chapter, int page, String imageKey) {
+    if (imageKey.startsWith("file://")) return;
+    ImageDownloader.loadComicImage(
+      imageKey,
+      reader.type.comicSource?.key,
+      reader.cid,
+      reader.eidOf(chapter),
+    );
+  }
+
+  void _ensureNeighbors() {
+    if (_segments.isEmpty) return;
+    var segment = _currentSegmentData;
+    if (segment == null) return;
+    if (reader.page >= segment.length - _preLoadThreshold) {
+      _ensureNextChapter();
+    }
+    if (_currentSegment == 0 && reader.page == 1) {
+      _ensurePrevChapter();
+    }
+  }
+
+  Future<void> _ensureNextChapter() async {
+    if (!_autoLoadNextChapter) return;
+    if (_loadingNext || _segments.isEmpty) return;
+    // The next chapter is already in the window; nothing to do.
+    if (_currentSegment != _segments.length - 1) return;
+    if (_nextRetryAt != null && DateTime.now().isBefore(_nextRetryAt!)) {
+      return;
+    }
+    var last = _segments.last;
+    var nextChapter = last.chapter + 1;
+    if (nextChapter > reader.maxChapter) return;
+    // Keep the existing group boundary behaviour: do not silently cross into
+    // another chapter group.
+    if (reader.isLastChapterOfGroupOf(last.chapter)) return;
+    if (_segments.any((segment) => segment.chapter == nextChapter)) return;
+
+    var generation = _generation;
+    setState(() {
+      _loadingNext = true;
+    });
+    var res = await reader.loadChapterImages(nextChapter);
+    if (!mounted || generation != _generation) return;
+    if (!_autoLoadNextChapter) {
+      setState(() {
+        _loadingNext = false;
+      });
+      return;
+    }
+    if (res.error || res.data.isEmpty) {
+      _nextRetryAt = DateTime.now().add(const Duration(seconds: 5));
+      Log.error(
+        "Reader",
+        "Failed to load next chapter $nextChapter: ${res.errorMessage}",
+      );
+      if (mounted) {
+        setState(() {
+          _loadingNext = false;
+        });
+      }
+      return;
+    }
+    _nextRetryAt = null;
+    if (_segments.isEmpty ||
+        _currentSegment != _segments.length - 1 ||
+        _segments.any((segment) => segment.chapter == nextChapter) ||
+        _segments.last.chapter + 1 != nextChapter) {
+      if (mounted) {
+        setState(() {
+          _loadingNext = false;
+        });
+      }
+      return;
+    }
+    setState(() {
+      _segments.add(_ContinuousSegment(nextChapter, res.data));
+      _loadingNext = false;
+    });
+    _prefetch(_indexOfImage(_segments.length - 1, 1));
+  }
+
+  Future<void> _ensurePrevChapter() async {
+    if (_loadingPrev || _segments.isEmpty) return;
+    // The previous chapter is already in the window; nothing to do.
+    if (_currentSegment != 0) return;
+    if (_prevRetryAt != null && DateTime.now().isBefore(_prevRetryAt!)) {
+      return;
+    }
+    var first = _segments.first;
+    var prevChapter = first.chapter - 1;
+    if (prevChapter < 1) return;
+    if (reader.isFirstChapterOfGroupOf(first.chapter)) return;
+    if (_segments.any((segment) => segment.chapter == prevChapter)) return;
+
+    var generation = _generation;
+    setState(() {
+      _loadingPrev = true;
+    });
+    var res = await reader.loadChapterImages(prevChapter);
+    if (!mounted || generation != _generation) return;
+    if (res.error || res.data.isEmpty) {
+      _prevRetryAt = DateTime.now().add(const Duration(seconds: 5));
+      Log.error(
+        "Reader",
+        "Failed to load previous chapter $prevChapter: ${res.errorMessage}",
+      );
+      if (mounted) {
+        setState(() {
+          _loadingPrev = false;
+        });
+      }
+      return;
+    }
+    _prevRetryAt = null;
+    if (_segments.isEmpty ||
+        _currentSegment != 0 ||
+        _segments.any((segment) => segment.chapter == prevChapter) ||
+        _segments.first.chapter - 1 != prevChapter) {
+      if (mounted) {
+        setState(() {
+          _loadingPrev = false;
+        });
+      }
+      return;
+    }
+    var segment = _ContinuousSegment(prevChapter, res.data);
+    var position = _captureVisiblePosition();
+    if (position == null) {
+      // The list is not attached yet; keep the loaded images in the cache and
+      // retry when the user actually scrolls near the top.
+      if (mounted) {
+        setState(() {
+          _loadingPrev = false;
+        });
+      }
+      return;
+    }
+    setState(() {
+      _segments.insert(0, segment);
+      _currentSegment++;
+      _loadingPrev = false;
+      _initialScrollIndex += segment.length;
+    });
+    _restorePosition(position.index + segment.length, position.alignment);
+  }
+
+  /// Drop chapters that are far ahead of the current one. Chapters behind the
+  /// current position are intentionally kept: removing them would shift the
+  /// absolute item indices and could cause a visible jump while scrolling.
+  void _trimSegments() {
+    const keepAfter = 3;
+    var removeAfter = _segments.length - _currentSegment - 1 - keepAfter;
+    if (removeAfter <= 0) return;
+    setState(() {
+      _segments.removeRange(_segments.length - removeAfter, _segments.length);
+    });
+  }
+
+  ({int index, double alignment})? _captureVisiblePosition() {
+    var controller = _scrollController;
+    if (controller == null || !controller.hasClients) return null;
+    var positions = itemPositionsListener.itemPositions.value
+        .where(
+          (position) => position.index >= 0 && position.index < _imageCount,
+        )
+        .toList();
+    if (positions.isEmpty) return null;
+    positions.sort((a, b) => a.index.compareTo(b.index));
+    var first = positions.first;
+    var viewport = controller.position.viewportDimension;
+    if (viewport <= 0) return null;
+    var alignment = first.itemLeadingEdge / viewport;
+    if (!alignment.isFinite) return null;
+    return (index: first.index, alignment: alignment);
+  }
+
+  void _restorePosition(int index, double alignment) {
+    if (index < 0) index = 0;
+    if (index >= _imageCount) index = _imageCount - 1;
+    if (index < 0) return;
+    _adjusting = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (itemScrollController.isAttached) {
+        itemScrollController.jumpTo(index: index, alignment: alignment);
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _adjusting = false;
+      });
+    });
+  }
+
+  /// Called when the user explicitly selects a chapter (chapter list, next /
+  /// previous buttons, volume keys, ...). If the target chapter is already in
+  /// the window we only scroll to it; otherwise the window is rebuilt.
+  Future<void> jumpToChapter(int chapter, {bool toLastPage = false}) async {
+    // A previous explicit jump is still loading; restart with the latest
+    // target instead of operating on a detached list.
+    if (_loadingChapter) {
+      await _loadChapterAndReplace(chapter, toLastPage: toLastPage);
+      return;
+    }
+    var existing = _segments.indexWhere(
+      (segment) => segment.chapter == chapter,
+    );
+    if (existing >= 0) {
+      // Invalidate any background chapter load so a stale result cannot
+      // replace the chapter the user just selected.
+      _generation++;
+      _nextRetryAt = null;
+      _prevRetryAt = null;
+      if (_loadingNext || _loadingPrev || _chapterError != null) {
+        setState(() {
+          _loadingNext = false;
+          _loadingPrev = false;
+          _chapterError = null;
+        });
+      }
+      var segment = _segments[existing];
+      var page = (toLastPage ? segment.length : 1)
+          .clamp(1, segment.length)
+          .toInt();
+      _enterSegment(existing, page, trim: false);
+      _initialScrollIndex = _indexOfImage(existing, page);
+      if (itemScrollController.isAttached) {
+        itemScrollController.jumpTo(index: _initialScrollIndex);
+      }
+      return;
+    }
+
+    await _loadChapterAndReplace(chapter, toLastPage: toLastPage);
+  }
+
+  Future<void> _loadChapterAndReplace(
+    int chapter, {
+    bool toLastPage = false,
+  }) async {
+    var generation = ++_generation;
+    setState(() {
+      _loadingChapter = true;
+      _chapterError = null;
+      _loadingNext = false;
+      _loadingPrev = false;
+      _nextRetryAt = null;
+      _prevRetryAt = null;
+    });
+    var res = await reader.loadChapterImages(chapter);
+    if (!mounted || generation != _generation) return;
+    if (res.error || res.data.isEmpty) {
+      var message = res.errorMessage ?? "No images".tl;
+      setState(() {
+        _loadingChapter = false;
+        _chapterError = message;
+        // The list was detached while loading; force a fresh one so stale
+        // PageStorage positions cannot override the current position.
+        _listKey++;
+      });
+      if (_segments.isNotEmpty && mounted) {
+        showToast(message: message, context: context, seconds: 1);
+      }
+      return;
+    }
+    var images = res.data;
+    var page = (toLastPage ? images.length : 1).clamp(1, images.length).toInt();
+    setState(() {
+      _segments
+        ..clear()
+        ..add(_ContinuousSegment(chapter, images));
+      _currentSegment = 0;
+      _initialScrollIndex = page - 1;
+      _listKey++;
+      _loadingChapter = false;
+    });
+    reader.chapter = chapter;
+    reader.images = images;
+    reader.page = page;
+    context.readerScaffold.update();
+    _prefetch(page - 1);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (itemScrollController.isAttached) {
+        itemScrollController.jumpTo(index: page - 1);
+      }
+      _ensureNeighbors();
+    });
   }
 
   double? _futurePosition;
@@ -793,37 +1253,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
     }
   }
 
-  void cacheImages(int current) {
-    for (int i = current + 1; i <= current + preCacheCount; i++) {
-      if (i <= reader.maxPage && !cached[i]) {
-        _preDownloadImage(i, context);
-        cached[i] = true;
-      }
-    }
-  }
-
-  void onScroll() {
-    if (prepareToPrevChapter) {
-      jumpToNextChapter = false;
-      jumpToPrevChapter =
-          scrollController.offset <
-          scrollController.position.minScrollExtent - _kChangeChapterOffset;
-    } else if (prepareToNextChapter) {
-      jumpToNextChapter =
-          scrollController.offset >
-          scrollController.position.maxScrollExtent + _kChangeChapterOffset;
-      jumpToPrevChapter = false;
-    }
-  }
-
   bool onScaleUpdate([double? scale]) {
-    if (prepareToNextChapter || prepareToPrevChapter) {
-      setState(() {
-        prepareToPrevChapter = false;
-        prepareToNextChapter = false;
-      });
-      context.readerScaffold.setFloatingButton(0);
-    }
     var isZoomedIn = (scale ?? photoViewController.scale) != 1.0;
     if (isZoomedIn != this.isZoomedIn) {
       setState(() {
@@ -835,18 +1265,37 @@ class _ContinuousModeState extends State<_ContinuousMode>
 
   @override
   Widget build(BuildContext context) {
+    if (_loadingChapter) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_segments.isEmpty) {
+      if (_chapterError != null) {
+        return GestureDetector(
+          onTap: () {
+            context.readerScaffold.openOrClose();
+          },
+          child: SizedBox.expand(
+            child: NetworkError(
+              message: _chapterError!,
+              retry: () {
+                jumpToChapter(reader.chapter);
+              },
+            ),
+          ),
+        );
+      }
+      return Center(child: Text("No images".tl));
+    }
+
     Widget widget = ScrollablePositionedList.builder(
-      initialScrollIndex: reader.page,
+      key: PageStorageKey<String>('continuous-$_instanceId-$_listKey'),
+      initialScrollIndex: _initialScrollIndex,
       itemScrollController: itemScrollController,
       itemPositionsListener: itemPositionsListener,
       scrollControllerCallback: (scrollController) {
-        if (_scrollController != null) {
-          _scrollController!.removeListener(onScroll);
-        }
         _scrollController = scrollController;
-        _scrollController!.addListener(onScroll);
       },
-      itemCount: reader.maxPage + 2,
+      itemCount: _itemCount,
       addSemanticIndexes: false,
       scrollDirection: reader.mode == ReaderMode.continuousTopToBottom
           ? Axis.vertical
@@ -858,9 +1307,25 @@ class _ContinuousModeState extends State<_ContinuousMode>
           ? const ClampingScrollPhysics()
           : const BouncingScrollPhysics(),
       itemBuilder: (context, index) {
-        if (index == 0 || index == reader.maxPage + 1) {
+        if (index >= _imageCount) {
+          // Placeholder while the next chapter is loading.
+          return Center(
+            child: SizedBox(
+              width: reader.mode == ReaderMode.continuousTopToBottom
+                  ? double.infinity
+                  : 80,
+              height: reader.mode == ReaderMode.continuousTopToBottom
+                  ? 80
+                  : double.infinity,
+              child: const Center(child: CircularProgressIndicator()),
+            ),
+          );
+        }
+        var location = _locateImage(index);
+        if (location == null) {
           return const SizedBox();
         }
+        var segment = _segments[location.segment];
         double? width, height;
         if (reader.mode == ReaderMode.continuousLeftToRight ||
             reader.mode == ReaderMode.continuousRightToLeft) {
@@ -869,7 +1334,11 @@ class _ContinuousModeState extends State<_ContinuousMode>
           width = double.infinity;
         }
 
-        ImageProvider image = _createImageProvider(index, context);
+        ImageProvider image = _createSegmentImageProvider(
+          segment,
+          location.page,
+          context,
+        );
 
         return ColoredBox(
           color: context.colorScheme.surface,
@@ -918,15 +1387,6 @@ class _ContinuousModeState extends State<_ContinuousMode>
           setState(() {
             disableScroll = false;
           });
-        }
-        if (fingers == 0) {
-          if (jumpToPrevChapter) {
-            context.readerScaffold.setFloatingButton(0);
-            reader.toPrevChapter(toLastPage: true);
-          } else if (jumpToNextChapter) {
-            context.readerScaffold.setFloatingButton(0);
-            reader.toNextChapter();
-          }
         }
       },
       onPointerCancel: (event) {
@@ -977,48 +1437,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
         } else if (notification is ScrollEndNotification) {
           delayedSetIsScrolling(false);
         }
-
-        var scale = photoViewController.scale ?? 1.0;
-
-        if (notification is ScrollUpdateNotification &&
-            (scale - 1).abs() < 0.05) {
-          if (!scrollController.hasClients) return false;
-          if (scrollController.position.pixels <=
-                  scrollController.position.minScrollExtent &&
-              !reader.isFirstChapterOfGroup) {
-            if (!prepareToPrevChapter) {
-              jumpToPrevChapter = false;
-              jumpToNextChapter = false;
-              context.readerScaffold.setFloatingButton(-1);
-              setState(() {
-                prepareToPrevChapter = true;
-              });
-            }
-          } else if (scrollController.position.pixels >=
-                  scrollController.position.maxScrollExtent &&
-              !reader.isLastChapterOfGroup) {
-            if (!prepareToNextChapter) {
-              jumpToPrevChapter = false;
-              jumpToNextChapter = false;
-              context.readerScaffold.setFloatingButton(1);
-              setState(() {
-                prepareToNextChapter = true;
-              });
-            }
-          } else {
-            context.readerScaffold.setFloatingButton(0);
-            if (prepareToPrevChapter || prepareToNextChapter) {
-              jumpToPrevChapter = false;
-              jumpToNextChapter = false;
-              setState(() {
-                prepareToPrevChapter = false;
-                prepareToNextChapter = false;
-              });
-            }
-          }
-        }
-
-        return true;
+        return false;
       },
       child: widget,
     );
@@ -1043,29 +1462,19 @@ class _ContinuousModeState extends State<_ContinuousMode>
   }
 
   Widget buildBackground(BuildContext context) {
-    return Column(
-      children: [
-        SizedBox(height: context.padding.top + 16),
-        if (prepareToPrevChapter)
-          _SwipeChangeChapterProgress(
-            controller: scrollController,
-            isPrev: true,
-          ),
-        const Spacer(),
-        if (prepareToNextChapter)
-          _SwipeChangeChapterProgress(
-            controller: scrollController,
-            isPrev: false,
-          ),
-        SizedBox(height: 36),
-      ],
-    );
+    return const SizedBox.shrink();
   }
 
   @override
-  Future<void> animateToPage(int page) {
-    return itemScrollController.scrollTo(
-      index: page,
+  Future<void> animateToPage(int page) async {
+    if (_segments.isEmpty) return;
+    var segment = _currentSegmentData;
+    if (segment == null) return;
+    var local = page.clamp(1, segment.length).toInt();
+    if (!itemScrollController.isAttached) return;
+    _initialScrollIndex = _indexOfImage(_currentSegment, local);
+    await itemScrollController.scrollTo(
+      index: _initialScrollIndex,
       duration: const Duration(milliseconds: 200),
       curve: Curves.ease,
     );
@@ -1126,7 +1535,14 @@ class _ContinuousModeState extends State<_ContinuousMode>
 
   @override
   void toPage(int page) {
-    itemScrollController.jumpTo(index: page);
+    if (_segments.isEmpty) return;
+    var segment = _currentSegmentData;
+    if (segment == null) return;
+    var local = page.clamp(1, segment.length).toInt();
+    _initialScrollIndex = _indexOfImage(_currentSegment, local);
+    if (itemScrollController.isAttached) {
+      itemScrollController.jumpTo(index: _initialScrollIndex);
+    }
     _futurePosition = null;
   }
 
@@ -1143,6 +1559,9 @@ class _ContinuousModeState extends State<_ContinuousMode>
       });
     }
     if (event is KeyUpEvent) {
+      return;
+    }
+    if (_scrollController == null || !_scrollController!.hasClients) {
       return;
     }
     bool? forward;
@@ -1195,10 +1614,21 @@ class _ContinuousModeState extends State<_ContinuousMode>
     if (imageKey.startsWith("file://")) {
       return await File(imageKey.substring(7)).readAsBytes();
     } else {
+      var eid = _providerForImageKey(imageKey)?.eid ?? reader.eid;
       return (await CacheManager().findCache(
-        "$imageKey@${context.reader.type.sourceKey}@${context.reader.cid}@${context.reader.eid}",
+        "$imageKey@${reader.type.sourceKey}@${reader.cid}@$eid",
       ))!.readAsBytes();
     }
+  }
+
+  ReaderImageProvider? _providerForImageKey(String imageKey) {
+    for (var imageState in imageStates) {
+      var image = (imageState as _ComicImageState).widget.image;
+      if (image is ReaderImageProvider && image.imageKey == imageKey) {
+        return image;
+      }
+    }
+    return null;
   }
 
   @override
@@ -1225,7 +1655,9 @@ ImageProvider _createImageProviderFromKey(
     reader.cid,
     reader.eid,
     reader.page,
-    enableResize: reader.mode.isContinuous, // For continuous mode, we need to resize the image to improve performance
+    enableResize: reader
+        .mode
+        .isContinuous, // For continuous mode, we need to resize the image to improve performance
   );
 }
 
@@ -1233,6 +1665,24 @@ ImageProvider _createImageProvider(int page, BuildContext context) {
   var reader = context.reader;
   var imageKey = reader.images![page - 1];
   return _createImageProviderFromKey(imageKey, context, page);
+}
+
+/// Image provider for a chapter segment in the continuous reader.
+ImageProvider _createSegmentImageProvider(
+  _ContinuousSegment segment,
+  int page,
+  BuildContext context,
+) {
+  var reader = context.reader;
+  return ReaderImageProvider(
+    segment.images[page - 1],
+    reader.type.comicSource?.key,
+    reader.cid,
+    reader.eidOf(segment.chapter),
+    page,
+    // Continuous mode needs resizing to keep the memory usage reasonable.
+    enableResize: true,
+  );
 }
 
 /// [_precacheImage] is used to precache the image for the given page.
@@ -1260,141 +1710,4 @@ void _preDownloadImage(int page, BuildContext context) {
   var eid = reader.eid;
   var sourceKey = reader.type.comicSource?.key;
   ImageDownloader.loadComicImage(imageKey, sourceKey, cid, eid);
-}
-
-class _SwipeChangeChapterProgress extends StatefulWidget {
-  const _SwipeChangeChapterProgress({this.controller, required this.isPrev});
-
-  final ScrollController? controller;
-
-  final bool isPrev;
-
-  @override
-  State<_SwipeChangeChapterProgress> createState() =>
-      _SwipeChangeChapterProgressState();
-}
-
-class _SwipeChangeChapterProgressState
-    extends State<_SwipeChangeChapterProgress> {
-  double value = 0;
-
-  late final isPrev = widget.isPrev;
-
-  ScrollController? controller;
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.controller != null) {
-      controller = widget.controller;
-      controller!.addListener(onScroll);
-    }
-  }
-
-  @override
-  void didUpdateWidget(covariant _SwipeChangeChapterProgress oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.controller != widget.controller) {
-      controller?.removeListener(onScroll);
-      controller = widget.controller;
-      controller?.addListener(onScroll);
-      if (value != 0) {
-        setState(() {
-          value = 0;
-        });
-      }
-    }
-  }
-
-  @override
-  void dispose() {
-    super.dispose();
-    controller?.removeListener(onScroll);
-  }
-
-  void onScroll() {
-    var position = controller!.position.pixels;
-    var offset = isPrev
-        ? controller!.position.minScrollExtent - position
-        : position - controller!.position.maxScrollExtent;
-    var newValue = offset / _kChangeChapterOffset;
-    newValue = newValue.clamp(0.0, 1.0);
-    if (newValue != value) {
-      setState(() {
-        value = newValue;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final msg = widget.isPrev
-        ? "Swipe down for previous chapter".tl
-        : "Swipe up for next chapter".tl;
-
-    return CustomPaint(
-      painter: _ProgressPainter(
-        value: value,
-        backgroundColor: context.colorScheme.surfaceContainerLow,
-        color: context.colorScheme.surfaceContainerHighest,
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            widget.isPrev ? Icons.arrow_downward : Icons.arrow_upward,
-            color: context.colorScheme.onSurface,
-            size: 16,
-          ),
-          const SizedBox(width: 4),
-          Text(msg),
-        ],
-      ).paddingVertical(6).paddingHorizontal(16),
-    );
-  }
-}
-
-class _ProgressPainter extends CustomPainter {
-  final double value;
-
-  final Color backgroundColor;
-
-  final Color color;
-
-  const _ProgressPainter({
-    required this.value,
-    required this.backgroundColor,
-    required this.color,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = backgroundColor
-      ..style = PaintingStyle.fill;
-    canvas.drawRRect(
-      RRect.fromLTRBR(0, 0, size.width, size.height, Radius.circular(16)),
-      paint,
-    );
-
-    paint.color = color;
-    canvas.drawRRect(
-      RRect.fromLTRBR(
-        0,
-        0,
-        size.width * value,
-        size.height,
-        Radius.circular(16),
-      ),
-      paint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) {
-    return oldDelegate is! _ProgressPainter ||
-        oldDelegate.value != value ||
-        oldDelegate.backgroundColor != backgroundColor ||
-        oldDelegate.color != color;
-  }
 }

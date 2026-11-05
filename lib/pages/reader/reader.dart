@@ -167,10 +167,58 @@ class _ReaderState extends State<Reader>
   @override
   String get cid => widget.cid;
 
-  String get eid => widget.chapters?.ids.elementAtOrNull(chapter - 1) ?? '0';
+  String get eid => eidOf(chapter);
+
+  String eidOf(int chapter) =>
+      widget.chapters?.ids.elementAtOrNull(chapter - 1) ?? '0';
 
   @override
   List<String>? images;
+
+  /// Images of chapters that were already loaded for seamless continuous
+  /// reading. Chapter index is 1-based, the same as [chapter].
+  final Map<int, List<String>> _chapterImagesCache = {};
+
+  final Map<int, Future<Res<List<String>>>> _loadingChapterImages = {};
+
+  /// Load the image list of a chapter, with de-duplication and a small cache.
+  Future<Res<List<String>>> loadChapterImages(int chapter) {
+    var cached = _chapterImagesCache[chapter];
+    if (cached != null) {
+      return Future.value(Res(cached));
+    }
+    var loading = _loadingChapterImages[chapter];
+    if (loading != null) {
+      return loading;
+    }
+    var future = _loadChapterImages(chapter);
+    _loadingChapterImages[chapter] = future;
+    future.whenComplete(() {
+      _loadingChapterImages.remove(chapter);
+    });
+    return future;
+  }
+
+  Future<Res<List<String>>> _loadChapterImages(int chapter) async {
+    try {
+      if (type == ComicType.local ||
+          LocalManager().isDownloaded(cid, type, chapter, widget.chapters)) {
+        var images = await LocalManager().getImages(cid, type, chapter);
+        if (images.isNotEmpty) {
+          _chapterImagesCache[chapter] = images;
+        }
+        return Res(images);
+      }
+      var cp = widget.chapters?.ids.elementAtOrNull(chapter - 1);
+      var res = await type.comicSource!.loadComicPages!(cid, cp);
+      if (!res.error && res.data.isNotEmpty) {
+        _chapterImagesCache[chapter] = res.data;
+      }
+      return res;
+    } catch (e) {
+      return Res.error(e.toString());
+    }
+  }
 
   @override
   late ReaderMode mode;
@@ -298,7 +346,14 @@ class _ReaderState extends State<Reader>
             builder: (context) {
               return _ReaderScaffold(
                 child: _ReaderGestureDetector(
-                  child: _ReaderImages(key: Key(chapter.toString())),
+                  // Keep the continuous reader alive when the chapter changes
+                  // implicitly while scrolling, otherwise the whole list would
+                  // be rebuilt and the seamless chapter transition would jump.
+                  child: _ReaderImages(
+                    key: Key(
+                      mode.isContinuous ? 'continuous' : chapter.toString(),
+                    ),
+                  ),
                 ),
               );
             },
@@ -369,38 +424,42 @@ class _ReaderState extends State<Reader>
     }
   }
 
-  bool get isFirstChapterOfGroup {
+  bool get isFirstChapterOfGroup => isFirstChapterOfGroupOf(chapter);
+
+  bool isFirstChapterOfGroupOf(int chapter) {
     if (widget.chapters?.isGrouped ?? false) {
-      int c = chapter - 1;
-      int g = 1;
-      while (c > 0) {
-        c -= widget.chapters!.getGroupByIndex(g - 1).length;
-        g++;
+      var chapters = widget.chapters!;
+      var remaining = chapter;
+      for (var i = 0; i < chapters.groupCount; i++) {
+        var length = chapters.getGroupByIndex(i).length;
+        if (length <= 0) continue;
+        if (remaining <= length) {
+          return remaining == 1;
+        }
+        remaining -= length;
       }
-      if (c == 0) {
-        return true;
-      } else {
-        return false;
-      }
+      return true;
     }
-    return chapter == 1;
+    return chapter <= 1;
   }
 
-  bool get isLastChapterOfGroup {
+  bool get isLastChapterOfGroup => isLastChapterOfGroupOf(chapter);
+
+  bool isLastChapterOfGroupOf(int chapter) {
     if (widget.chapters?.isGrouped ?? false) {
-      int c = chapter;
-      int g = 1;
-      while (c > 0) {
-        c -= widget.chapters!.getGroupByIndex(g - 1).length;
-        g++;
+      var chapters = widget.chapters!;
+      var remaining = chapter;
+      for (var i = 0; i < chapters.groupCount; i++) {
+        var length = chapters.getGroupByIndex(i).length;
+        if (length <= 0) continue;
+        if (remaining <= length) {
+          return remaining == length;
+        }
+        remaining -= length;
       }
-      if (c == 0) {
-        return true;
-      } else {
-        return false;
-      }
+      return true;
     }
-    return chapter == maxChapter;
+    return chapter >= maxChapter;
   }
 
   /// Get the size of the reader.
@@ -415,7 +474,7 @@ abstract mixin class _ImagePerPageHandler {
   late int _lastImagesPerPage;
 
   late bool _lastOrientation;
-  
+
   /// Track if we were on the chapter comments page before orientation change
   bool _wasOnCommentsPage = false;
 
@@ -430,13 +489,13 @@ abstract mixin class _ImagePerPageHandler {
   String get cid;
 
   ComicType get type;
-  
+
   /// Whether the current page is the chapter comments page
   bool get isOnChapterCommentsPage;
-  
+
   /// Get the max page (excluding comments page)
   int get maxPage;
-  
+
   /// Get images list for calculating maxPage
   List<String>? get images;
 
@@ -478,7 +537,7 @@ abstract mixin class _ImagePerPageHandler {
           1;
     }
   }
-  
+
   /// Calculate maxPage with a specific imagesPerPage value
   int _calcMaxPage(int imagesPerPageValue) {
     if (images == null) return 1;
@@ -498,7 +557,7 @@ abstract mixin class _ImagePerPageHandler {
       // if we were on the comments page before the orientation change
       int oldMaxPage = _calcMaxPage(_lastImagesPerPage);
       _wasOnCommentsPage = page > oldMaxPage;
-      
+
       _adjustPageForImagesPerPageChange(
         _lastImagesPerPage,
         currentImagesPerPage,
@@ -537,7 +596,7 @@ abstract mixin class _ImagePerPageHandler {
 
     // Clamp to valid range (1 to maxPage)
     newPage = newPage.clamp(1, maxPage);
-    
+
     // If we were on the comments page, stay on the comments page
     if (_wasOnCommentsPage) {
       page = maxPage + 1;
@@ -612,6 +671,8 @@ abstract mixin class _ReaderLocation {
 
   int get maxChapter;
 
+  ReaderMode get mode;
+
   bool get isLoading;
 
   String get cid;
@@ -641,11 +702,17 @@ abstract mixin class _ReaderLocation {
 
   /// Returns true if the page is changed
   bool toNextPage() {
+    if (mode.isContinuous && _imageViewController is _ContinuousModeState) {
+      return (_imageViewController as _ContinuousModeState).toNextImage();
+    }
     return toPage(page + 1);
   }
 
   /// Returns true if the page is changed
   bool toPrevPage() {
+    if (mode.isContinuous && _imageViewController is _ContinuousModeState) {
+      return (_imageViewController as _ContinuousModeState).toPrevImage();
+    }
     return toPage(page - 1);
   }
 
@@ -697,6 +764,16 @@ abstract mixin class _ReaderLocation {
 
   bool toChapter(int c, {bool toLastPage = false}) {
     if (_validateChapter(c) && !isLoading) {
+      if (mode.isContinuous && _imageViewController is _ContinuousModeState) {
+        // The continuous reader owns a sliding window of chapters. Let it
+        // load the target chapter and keep the scroll position management in
+        // one place.
+        (_imageViewController as _ContinuousModeState).jumpToChapter(
+          c,
+          toLastPage: toLastPage,
+        );
+        return true;
+      }
       chapter = c;
       page = 1;
       _jumpToLastPageOnLoad = toLastPage;
@@ -719,10 +796,10 @@ abstract mixin class _ReaderLocation {
         'autoPageTurningInterval',
       );
       autoPageTurningTimer = Timer.periodic(Duration(seconds: interval), (_) {
-        if (page == maxPage) {
+        if (!toNextPage()) {
           autoPageTurningTimer!.cancel();
+          autoPageTurningTimer = null;
         }
-        toNextPage();
       });
     }
   }
