@@ -189,39 +189,98 @@ jobs:
   Release:
     runs-on: ubuntu-22.04
     needs: [Build_MacOS, Build_IOS, Build_Android, Build_Windows, Build_Linux, Build_Linux_ARM64]
-    if: github.event_name == 'release'  # 仅在发布 release 时执行
+    # 任一平台失败时仍然收集已成功的产物，但不要在整个流程被取消时发布
+    if: ${{ !cancelled() && github.event_name == 'release' }}
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download macOS artifact
+        id: download_macos
+        if: needs.Build_MacOS.result == 'success'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: macos_build
           path: outputs
-      - uses: actions/download-artifact@v4
+      - name: Download iOS artifact
+        id: download_ios
+        if: needs.Build_IOS.result == 'success'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: ios_build
           path: outputs
-      - uses: actions/download-artifact@v4
+      - name: Download Android artifact
+        id: download_android
+        if: needs.Build_Android.result == 'success'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: apks
           path: outputs
-      - uses: actions/download-artifact@v4
+      - name: Download Windows artifact
+        id: download_windows
+        if: needs.Build_Windows.result == 'success'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: windows_build
           path: outputs
-      - uses: actions/download-artifact@v4
+      - name: Download Linux artifact
+        id: download_linux
+        if: needs.Build_Linux.result == 'success'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: deb_build
           path: outputs
-      - uses: actions/download-artifact@v4
+      - name: Download Arch Linux artifact
+        id: download_arch
+        if: needs.Build_Linux.result == 'success'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: arch_build
           path: outputs
-      - uses: actions/download-artifact@v4
+      - name: Download Linux ARM64 artifact
+        id: download_linux_arm64
+        if: needs.Build_Linux_ARM64.result == 'success'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
           name: deb_arm64_build
           path: outputs
-      - uses: softprops/action-gh-release@v2
+      - name: Check downloaded artifacts
+        id: artifacts
+        run: |
+          mkdir -p outputs
+          count=$(find outputs -type f | wc -l | tr -d '[:space:]')
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "Downloaded $count artifact file(s)."
+          {
+            echo "## Release artifact status"
+            echo ""
+            echo "| Platform | Build | Download |"
+            echo "|---|---|---|"
+            echo "| macOS | ${{ needs.Build_MacOS.result }} | ${{ steps.download_macos.outcome }} |"
+            echo "| iOS | ${{ needs.Build_IOS.result }} | ${{ steps.download_ios.outcome }} |"
+            echo "| Android | ${{ needs.Build_Android.result }} | ${{ steps.download_android.outcome }} |"
+            echo "| Windows | ${{ needs.Build_Windows.result }} | ${{ steps.download_windows.outcome }} |"
+            echo "| Linux x64 | ${{ needs.Build_Linux.result }} | ${{ steps.download_linux.outcome }} |"
+            echo "| Arch Linux | ${{ needs.Build_Linux.result }} | ${{ steps.download_arch.outcome }} |"
+            echo "| Linux ARM64 | ${{ needs.Build_Linux_ARM64.result }} | ${{ steps.download_linux_arm64.outcome }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Warn about incomplete release
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: echo "::warning::One or more platform builds did not succeed; only successful artifacts will be published."
+      - name: Fail if no artifacts were downloaded
+        if: steps.artifacts.outputs.count == '0'
+        run: |
+          echo "::error::No build artifacts were downloaded, aborting release."
+          exit 1
+      - name: Publish release
+        if: steps.artifacts.outputs.count != '0'
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           files: |
