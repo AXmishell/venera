@@ -104,22 +104,67 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
   }
 
   void openOrClose() {
-    if (!_isOpen) {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    if (_isOpen) {
+      closeBars();
     } else {
-      if (!appdata.settings['showSystemStatusBar']) {
-        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersive);
-      } else {
-        SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-      }
+      openBars();
     }
+  }
+
+  void openBars() {
+    if (_isOpen) return;
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     setState(() {
-      _isOpen = !_isOpen;
+      _isOpen = true;
       // Moving a BackdropFilter forces the backdrop to be blurred again on
       // every frame. Use the opaque surface while sliding and restore the
       // blur once the bars settle.
       _barsAnimating = true;
     });
+  }
+
+  void closeBars() {
+    if (!_isOpen) return;
+    if (!appdata.settings['showSystemStatusBar']) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersive);
+    } else {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    }
+    setState(() {
+      _isOpen = false;
+      _barsAnimating = true;
+    });
+  }
+
+  /// Whether the top/bottom bars should be hidden automatically when the user
+  /// scrolls the comic.
+  bool get autoHideBarsOnScroll =>
+      appdata.settings.getReaderSetting(
+        context.reader.cid,
+        context.reader.type.sourceKey,
+        'autoHideReaderBars',
+      ) !=
+      false;
+
+  /// Hide the bars when the user drags the comic.
+  ///
+  /// Only scrolls caused by a user drag trigger this: notifications coming
+  /// from programmatic scrolls (slider, chapter jump, auto page turning) have
+  /// a null `dragDetails` and are ignored, so the bars stay visible.
+  bool onScrollNotification(ScrollNotification notification) {
+    if (!_isOpen) return false;
+    final isUserDrag =
+        (notification is ScrollStartNotification &&
+            notification.dragDetails != null) ||
+        (notification is ScrollUpdateNotification &&
+            notification.dragDetails != null) ||
+        (notification is OverscrollNotification &&
+            notification.dragDetails != null);
+    if (isUserDrag && autoHideBarsOnScroll) {
+      closeBars();
+    }
+    // Never consume the notification, other listeners may need it.
+    return false;
   }
 
   bool _barsAnimating = false;
@@ -150,7 +195,10 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
           child: RepaintBoundary(
             child: AbsorbPointer(
               absorbing: context.reader.isPageAnimating,
-              child: widget.child,
+              child: NotificationListener<ScrollNotification>(
+                onNotification: onScrollNotification,
+                child: widget.child,
+              ),
             ),
           ),
         ),

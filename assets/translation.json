@@ -441,7 +441,9 @@
     "Ignore Certificate Errors": "忽略证书错误",
     "Mouse scroll speed": "鼠标滚动速度",
     "Auto-load next chapter": "自动加载下一章",
-    "Automatically load the next chapter while scrolling": "滚动到章节末尾时自动加载下一章"
+    "Automatically load the next chapter while scrolling": "滚动到章节末尾时自动加载下一章",
+    "Auto hide bars while scrolling": "滑动时自动隐藏工具栏",
+    "Hide the top and bottom bars when dragging the comic": "拖动漫画时隐藏顶部和底部工具栏"
   },
   "zh_TW": {
     "Home": "首頁",
@@ -885,6 +887,8 @@
     "Ignore Certificate Errors": "忽略證書錯誤",
     "Mouse scroll speed": "滑鼠滾動速度",
     "Auto-load next chapter": "自動載入下一章",
-    "Automatically load the next chapter while scrolling": "捲動到章節末尾時自動載入下一章"
+    "Automatically load the next chapter while scrolling": "捲動到章節末尾時自動載入下一章",
+    "Auto hide bars while scrolling": "滑動時自動隱藏工具列",
+    "Hide the top and bottom bars when dragging the comic": "拖動漫畫時隱藏頂部和底部工具列"
   }
 }

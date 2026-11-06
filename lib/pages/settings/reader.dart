@@ -407,6 +407,17 @@ class _ReaderSettingsState extends State<ReaderSettings> {
           comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
           useDeviceSettings: useDeviceSpecificSettings,
         ).toSliver(),
+        _SwitchSetting(
+          title: "Auto hide bars while scrolling".tl,
+          subtitle: "Hide the top and bottom bars when dragging the comic".tl,
+          settingKey: "autoHideReaderBars",
+          onChanged: () {
+            widget.onChanged?.call("autoHideReaderBars");
+          },
+          comicId: isEnabledSpecificSettings ? widget.comicId : null,
+          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
+          useDeviceSettings: useDeviceSpecificSettings,
+        ).toSliver(),
         SelectSetting(
           title: "Quick collect image".tl,
           settingKey: "quickCollectImage",
