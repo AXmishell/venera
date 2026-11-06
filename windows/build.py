@@ -1,40 +1,72 @@
-import subprocess
 import os
+import re
+import shutil
+import subprocess
+
 import httpx
 
-file = open('pubspec.yaml', 'r')
-content = file.read()
-file.close()
+ISL_URL = "https://cdn.jsdelivr.net/gh/kira-96/Inno-Setup-Chinese-Simplified-Translation@latest/ChineseSimplified.isl"
 
-subprocess.run(["flutter", "build", "windows"], shell=True)
 
-if os.path.exists("build/app-windows.zip"):
-    os.remove("build/app-windows.zip")
+def read_version(path="pubspec.yaml"):
+    with open(path, "r", encoding="utf-8") as file:
+        content = file.read()
+    match = re.search(r"^version:\s*([^+\s]+)", content, re.MULTILINE)
+    if not match:
+        raise SystemExit("Could not read version from pubspec.yaml")
+    return match.group(1)
 
-version = str.split(str.split(content, 'version: ')[1], '+')[0]
 
-subprocess.run(["tar", "-a", "-c", "-f", f"build/windows/Venera-{version}-windows.zip", "-C", "build/windows/x64/runner/Release", "*"]
-               , shell=True)
+def require_non_empty_file(path):
+    if not os.path.isfile(path) or os.path.getsize(path) == 0:
+        raise SystemExit(f"Expected a non-empty file: {path}")
 
-issContent = ""
-file = open('windows/build.iss', 'r')
-issContent = file.read()
-newContent = issContent
-newContent = newContent.replace("{{version}}", version)
-newContent = newContent.replace("{{root_path}}", os.getcwd())
-file.close()
-file = open('windows/build.iss', 'w')
-file.write(newContent)
-file.close()
 
-if not os.path.exists("windows/ChineseSimplified.isl"):
-    # download ChineseSimplified.isl
-    url = "https://cdn.jsdelivr.net/gh/kira-96/Inno-Setup-Chinese-Simplified-Translation@latest/ChineseSimplified.isl"
-    response = httpx.get(url)
-    with open('windows/ChineseSimplified.isl', 'wb') as file:
-        file.write(response.content)
+def main():
+    version = read_version()
 
-subprocess.run(["iscc", "windows/build.iss"], shell=True)
+    subprocess.run("flutter build windows", shell=True, check=True)
 
-with open('windows/build.iss', 'w') as file:
-    file.write(issContent)
+    release_dir = os.path.join("build", "windows", "x64", "runner", "Release")
+    if not os.path.isdir(release_dir) or not os.listdir(release_dir):
+        raise SystemExit(f"Missing or empty build output: {release_dir}")
+
+    zip_base = os.path.join("build", "windows", f"Venera-{version}-windows")
+    zip_path = f"{zip_base}.zip"
+    if os.path.exists(zip_path):
+        os.remove(zip_path)
+    shutil.make_archive(zip_base, "zip", release_dir)
+    require_non_empty_file(zip_path)
+
+    iss_path = os.path.join("windows", "build.iss")
+    with open(iss_path, "r", encoding="utf-8") as file:
+        iss_content = file.read()
+
+    rendered_iss = iss_content.replace("{{version}}", version).replace(
+        "{{root_path}}", os.getcwd()
+    )
+    with open(iss_path, "w", encoding="utf-8") as file:
+        file.write(rendered_iss)
+
+    try:
+        isl_path = os.path.join("windows", "ChineseSimplified.isl")
+        if not os.path.exists(isl_path):
+            response = httpx.get(ISL_URL, follow_redirects=True, timeout=30)
+            response.raise_for_status()
+            with open(isl_path, "wb") as file:
+                file.write(response.content)
+            require_non_empty_file(isl_path)
+
+        subprocess.run("iscc windows/build.iss", shell=True, check=True)
+
+        installer = os.path.join(
+            "build", "windows", f"Venera-{version}-windows-installer.exe"
+        )
+        require_non_empty_file(installer)
+    finally:
+        with open(iss_path, "w", encoding="utf-8") as file:
+            file.write(iss_content)
+
+
+if __name__ == "__main__":
+    main()
