@@ -83,17 +83,56 @@ jobs:
           channel: "stable"
           flutter-version-file: pubspec.yaml
           architecture: x64
-      - name: Decode and install certificate
-        env:
-          STORE_FILE: ${{ secrets.ANDROID_KEYSTORE }}
-          PROPERTY_FILE: ${{ secrets.ANDROID_KEY_PROPERTIES }}
-        run: |
-            echo "$STORE_FILE" | base64 --decode > android/keystore.jks
-            echo "$PROPERTY_FILE" > android/key.properties
       - uses: actions/setup-java@v4
         with:
           distribution: 'oracle'
           java-version: '17'
+      - name: Decode and validate Android signing
+        env:
+          ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+          ANDROID_KEY_PROPERTIES: ${{ secrets.ANDROID_KEY_PROPERTIES }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$ANDROID_KEYSTORE" ] || [ -z "$ANDROID_KEY_PROPERTIES" ]; then
+            echo "::error::ANDROID_KEYSTORE and ANDROID_KEY_PROPERTIES must both be configured"
+            exit 1
+          fi
+
+          echo "$ANDROID_KEYSTORE" | base64 --decode > android/keystore.jks
+          echo "$ANDROID_KEY_PROPERTIES" > android/key.properties
+
+          get_prop() {
+            sed -n "s/^$1=//p" android/key.properties | tail -n1 | tr -d '\r'
+          }
+
+          STORE_PASSWORD=$(get_prop storePassword)
+          KEY_ALIAS=$(get_prop keyAlias)
+          KEY_PASSWORD=$(get_prop keyPassword)
+          STORE_PATH=$(get_prop storeFile)
+
+          for name in STORE_PASSWORD KEY_ALIAS KEY_PASSWORD STORE_PATH; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing $name in ANDROID_KEY_PROPERTIES"
+              exit 1
+            fi
+          done
+
+          case "$STORE_PATH" in
+            /*) ;;
+            *) STORE_PATH="android/app/$STORE_PATH" ;;
+          esac
+
+          if [ ! -s "$STORE_PATH" ]; then
+            echo "::error::Keystore not found or empty: $STORE_PATH"
+            echo "::error::Ensure ANDROID_KEYSTORE is set and storeFile points to ../keystore.jks"
+            exit 1
+          fi
+
+          keytool -list -keystore "$STORE_PATH" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
+          keytool -certreq -alias "$KEY_ALIAS" -keystore "$STORE_PATH" -storepass "$STORE_PASSWORD" -keypass "$KEY_PASSWORD" -file /dev/null >/dev/null
+
+          echo "Android signing configuration validated."
       - name: Check rust-toolchain.toml
         run: rustup show
       - run: flutter pub get
