@@ -32,19 +32,35 @@ class HistoryImageProvider
       history.cover = url;
       HistoryManager().addHistory(history);
     }
-    await for (var progress in ImageDownloader.loadThumbnail(
-      url,
-      history.type.sourceKey,
-      history.id,
-    )) {
-      checkStop();
-      chunkEvents.add(ImageChunkEvent(
-        cumulativeBytesLoaded: progress.currentBytes,
-        expectedTotalBytes: progress.totalBytes,
-      ));
-      if (progress.imageBytes != null) {
-        return progress.imageBytes!;
+    try {
+      await for (var progress in ImageDownloader.loadThumbnail(
+        url,
+        history.type.sourceKey,
+        history.id,
+      )) {
+        checkStop();
+        chunkEvents.add(ImageChunkEvent(
+          cumulativeBytesLoaded: progress.currentBytes,
+          expectedTotalBytes: progress.totalBytes,
+        ));
+        if (progress.imageBytes != null) {
+          return progress.imageBytes!;
+        }
       }
+    } catch (e) {
+      // The cover URL may be expired or hotlink-protected while the comic is
+      // downloaded locally. Fall back to the local cover in that case.
+      var localComic = LocalManager().find(history.id, history.type);
+      if (localComic != null) {
+        var file = localComic.coverFile;
+        if (await file.exists()) {
+          var data = await file.readAsBytes();
+          if (data.isNotEmpty) {
+            return data;
+          }
+        }
+      }
+      rethrow;
     }
     throw "Error: Empty response body.";
   }

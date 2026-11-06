@@ -33,6 +33,21 @@ final _resolver = MimeTypeResolver()
 ;
 
 FileType detectFileType(List<int> data) {
+  // AVIF is an ISO BMFF container: the ftyp box size varies between files,
+  // so matching a fixed prefix (as the mime package does by default) misses
+  // many valid files. Check the box type and brands instead.
+  if (data.length >= 12 &&
+      data[4] == 0x66 && // f
+      data[5] == 0x74 && // t
+      data[6] == 0x79 && // y
+      data[7] == 0x70) {
+    // p
+    var end = data.length < 40 ? data.length : 40;
+    var brands = String.fromCharCodes(data.sublist(8, end));
+    if (brands.contains('avif') || brands.contains('avis')) {
+      return const FileType('.avif', 'image/avif');
+    }
+  }
   var mime = _resolver.lookup('no-file', headerBytes: data);
   var ext = mime == null ? '' : extensionFromMime(mime);
   if(ext == 'jpe') {

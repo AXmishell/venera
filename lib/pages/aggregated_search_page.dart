@@ -41,6 +41,7 @@ class _AggregatedSearchPageState extends State<AggregatedSearchPage> {
     controller = SearchBarController(
       currentText: widget.keyword,
       onSearch: (text) {
+        appdata.addSearchHistory(text);
         setState(() {
           _keyword = text;
         });

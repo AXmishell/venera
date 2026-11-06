@@ -269,7 +269,15 @@ class ImportComic {
           }
         }
       } else if (entry is File) {
-        const imageExtensions = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'jpe'];
+        const imageExtensions = [
+          'jpg',
+          'jpeg',
+          'jpe',
+          'png',
+          'webp',
+          'gif',
+          'avif'
+        ];
         if (imageExtensions.contains(entry.extension)) {
           fileList.add(entry.name);
         }

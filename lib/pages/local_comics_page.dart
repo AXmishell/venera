@@ -513,6 +513,9 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
       // For multiple comics, compress the folder
       loadingController.setProgress(null);
       loadingController.setMessage("Compressing".tl);
+      // Remove a leftover archive from a previous failed export, otherwise
+      // the compressor may fail with "Failed to write content".
+      File(outFile).deleteIgnoreError();
       await ZipFile.compressFolderAsync(cacheDir, outFile);
       if (canceled) {
         File(outFile).deleteIgnoreError();

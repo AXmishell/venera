@@ -3,6 +3,7 @@ import 'dart:isolate';
 
 import 'package:flutter/widgets.dart' show ChangeNotifier;
 import 'package:flutter_saf/flutter_saf.dart';
+import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
@@ -11,6 +12,7 @@ import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/network/download.dart';
 import 'package:venera/pages/reader/reader.dart';
+import 'package:venera/utils/file_type.dart';
 import 'package:venera/utils/io.dart';
 
 import 'app.dart';
@@ -176,6 +178,18 @@ class LocalComic with HistoryMixin implements Comic {
 class LocalManager with ChangeNotifier {
   static LocalManager? _instance;
 
+  static const _imageExtensions = {
+    'jpg',
+    'jpeg',
+    'jpe',
+    'jfif',
+    'png',
+    'webp',
+    'gif',
+    'bmp',
+    'avif',
+  };
+
   LocalManager._();
 
   factory LocalManager() {
@@ -203,6 +217,13 @@ class LocalManager with ChangeNotifier {
     var newDir = Directory(newPath);
     if (!await newDir.exists()) {
       return "Directory does not exist";
+    }
+    // Copying the current directory into one of its own subdirectories would
+    // recurse into the newly created directory (e.g. downloads/downloads/...).
+    var oldAbsolute = p.normalize(p.absolute(directory.path));
+    var newAbsolute = p.normalize(p.absolute(newPath));
+    if (newAbsolute == oldAbsolute || p.isWithin(oldAbsolute, newAbsolute)) {
+      return "The new directory cannot be the current directory or inside it";
     }
     if (!await newDir.list().isEmpty) {
       return "Directory is not empty";
@@ -414,6 +435,28 @@ class LocalManager with ChangeNotifier {
     return res.map((row) => LocalComic.fromRow(row)).toList();
   }
 
+  /// Check whether [file] is likely an image.
+  ///
+  /// Files with a known image extension are accepted directly. Files without a
+  /// (recognized) extension are probed by their magic bytes, which also keeps
+  /// AVIF files saved by older versions (without an extension) readable.
+  static Future<bool> _isImageFile(File file) async {
+    if (_imageExtensions.contains(file.extension)) {
+      return true;
+    }
+    try {
+      var raf = await file.open();
+      try {
+        var header = await raf.read(32);
+        return detectFileType(header).mime.startsWith("image/");
+      } finally {
+        await raf.close();
+      }
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<List<String>> getImages(String id, ComicType type, Object ep) async {
     if (ep is! String && ep is! int) {
       throw "Invalid ep";
@@ -436,6 +479,11 @@ class LocalManager with ChangeNotifier {
         }
         //Hidden file in some file system
         if (entity.name.startsWith('.')) {
+          continue;
+        }
+        // Ignore non-image files in the directory, otherwise trying to decode
+        // them crashes the image loader.
+        if (!await _isImageFile(entity)) {
           continue;
         }
         files.add(entity);

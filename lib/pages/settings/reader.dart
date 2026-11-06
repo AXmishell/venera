@@ -318,7 +318,7 @@ class _ReaderSettingsState extends State<ReaderSettings> {
         SliverAnimatedVisibility(
           visible: readerMode.startsWith('continuous'),
           child: _SwitchSetting(
-            title: "Continuous mode auto-load next chapter".tl,
+            title: "Auto-load next chapter".tl,
             subtitle: "Automatically load the next chapter while scrolling".tl,
             settingKey: "continuousAutoLoadNextChapter",
             onChanged: () {

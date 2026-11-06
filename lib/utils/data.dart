@@ -100,6 +100,21 @@ Future<File> exportAppData([bool sync = true]) async {
   return cacheFile;
 }
 
+/// Move [file] to [destPath].
+///
+/// A plain rename fails with `OS Error 17` when the cache and the data
+/// directory are on different file systems (e.g. Windows, where the cache is
+/// in LocalAppData and the data directory is in Roaming). Fall back to a
+/// copy followed by a delete in that case.
+Future<void> _moveFile(File file, String destPath) async {
+  try {
+    await file.rename(destPath);
+  } on FileSystemException {
+    await file.copy(destPath);
+    await file.delete();
+  }
+}
+
 Future<void> importAppData(File file, [bool checkVersion = false]) async {
   var cacheDirPath = FilePath.join(App.cachePath, 'temp_data');
   var cacheDir = Directory(cacheDirPath);
@@ -125,7 +140,7 @@ Future<void> importAppData(File file, [bool checkVersion = false]) async {
     if (await historyFile.exists()) {
       HistoryManager().close();
       File(FilePath.join(App.dataPath, "history.db")).deleteIfExistsSync();
-      historyFile.renameSync(FilePath.join(App.dataPath, "history.db"));
+      await _moveFile(historyFile, FilePath.join(App.dataPath, "history.db"));
       HistoryManager().init();
     }
     if (await localFavoriteFile.exists()) {
@@ -133,7 +148,8 @@ Future<void> importAppData(File file, [bool checkVersion = false]) async {
       File(
         FilePath.join(App.dataPath, "local_favorite.db"),
       ).deleteIfExistsSync();
-      localFavoriteFile.renameSync(
+      await _moveFile(
+        localFavoriteFile,
         FilePath.join(App.dataPath, "local_favorite.db"),
       );
       LocalFavoritesManager().init();
@@ -146,7 +162,7 @@ Future<void> importAppData(File file, [bool checkVersion = false]) async {
     if (await cookieFile.exists()) {
       SingleInstanceCookieJar.instance?.dispose();
       File(FilePath.join(App.dataPath, "cookie.db")).deleteIfExistsSync();
-      cookieFile.renameSync(FilePath.join(App.dataPath, "cookie.db"));
+      await _moveFile(cookieFile, FilePath.join(App.dataPath, "cookie.db"));
       SingleInstanceCookieJar.instance = SingleInstanceCookieJar(
         FilePath.join(App.dataPath, "cookie.db"),
       )..init();

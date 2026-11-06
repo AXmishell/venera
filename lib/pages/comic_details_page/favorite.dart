@@ -329,6 +329,9 @@ class _NetworkSectionState extends State<_NetworkSection> {
                         .favoriteData!
                         .addOrDelFavorite!(widget.cid, '', !isFavorite, null);
                     if (res.success) {
+                      // Invalidate network cache so the favorites page does
+                      // not show a cached list without this comic.
+                      NetworkCacheManager().clear();
                       setState(() {
                         localIsFavorite = !isFavorite;
                       });

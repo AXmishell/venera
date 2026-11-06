@@ -327,6 +327,11 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
           var r = await source.loadComicPages!(comicId, null);
           if (r.error) {
             throw r.errorMessage!;
+          } else if (r.data.isEmpty) {
+            // An empty image list means the chapter was not fetched correctly.
+            // Treating it as success would mark the chapter as downloaded
+            // without creating any files.
+            throw "Empty image list";
           } else {
             return r.data;
           }
@@ -362,6 +367,8 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
             var r = await source.loadComicPages!(comicId, i);
             if (r.error) {
               throw r.errorMessage!;
+            } else if (r.data.isEmpty) {
+              throw "Empty image list";
             } else {
               return r.data;
             }
@@ -498,7 +505,11 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
       chapters: comic!.chapters,
       cover: File(_cover!.split("file://").last).name,
       comicType: ComicType(source.key.hashCode),
-      downloadedChapters: chapters ?? comic?.chapters?.ids.toList() ?? [],
+      // Only mark the chapters that were actually fetched. For comics without
+      // chapters [_images] only contains the empty key.
+      downloadedChapters: _images == null
+          ? (chapters ?? comic?.chapters?.ids.toList() ?? [])
+          : _images!.keys.where((e) => e.isNotEmpty).toList(),
       createdAt: DateTime.now(),
     );
   }

@@ -110,7 +110,7 @@ abstract class CBZ {
     var files = cache.listSync().whereType<File>().toList();
     files.removeWhere((e) {
       var ext = e.path.split('.').last;
-      return !['jpg', 'jpeg', 'png', 'webp', 'gif', 'jpe'].contains(ext);
+      return !['jpg', 'jpeg', 'png', 'webp', 'gif', 'jpe', 'avif'].contains(ext);
     });
     if (files.isEmpty) {
       cache.deleteSync(recursive: true);
@@ -237,7 +237,7 @@ abstract class CBZ {
       }
       int i = 1;
       for (var image in allImages) {
-        var src = File(image);
+        var src = File(image.replaceFirst('file://', ''));
         var width = allImages.length.toString().length;
         var dstName =
             '${i.toString().padLeft(width, '0')}.${image.split('.').last}';

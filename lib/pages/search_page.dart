@@ -48,9 +48,13 @@ class _SearchPageState extends State<SearchPage> {
 
   void search([String? text]) {
     if (aggregatedSearch) {
+      var keyword = text ?? controller.text;
+      // The aggregated search page does not go through SearchResultPage, so
+      // the keyword has to be recorded here as well.
+      appdata.addSearchHistory(keyword);
       context
           .to(
-            () => AggregatedSearchPage(keyword: text ?? controller.text)
+            () => AggregatedSearchPage(keyword: keyword)
           )
           .then((_) => update());
     } else {

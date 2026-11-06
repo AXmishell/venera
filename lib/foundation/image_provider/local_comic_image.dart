@@ -27,7 +27,7 @@ class LocalComicImageProvider
       Directory? firstDir;
       await for (var entity in dir.list()) {
         if(entity is File) {
-          if(["jpg", "jpeg", "png", "webp", "gif", "jpe", "jpeg"].contains(entity.extension)) {
+          if(["jpg", "jpeg", "png", "webp", "gif", "jpe", "avif"].contains(entity.extension)) {
             file = entity;
             break;
           }
@@ -38,7 +38,7 @@ class LocalComicImageProvider
       if(file == null && firstDir != null) {
         await for (var entity in firstDir.list()) {
           if(entity is File) {
-            if(["jpg", "jpeg", "png", "webp", "gif", "jpe", "jpeg"].contains(entity.extension)) {
+            if(["jpg", "jpeg", "png", "webp", "gif", "jpe", "avif"].contains(entity.extension)) {
               file = entity;
               break;
             }
