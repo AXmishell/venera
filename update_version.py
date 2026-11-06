@@ -1,10 +1,21 @@
 #!/usr/bin/env python3
 """Update the app version in pubspec.yaml and lib/foundation/app.dart.
 
+Build numbers are derived from the semantic version so that they always
+increase across releases:
+
+    major * 10000 + minor * 100 + patch
+    1.7.5  -> 10705
+    1.7.10 -> 10710
+    1.8.0  -> 10800
+
+Android appends an ABI/debug lane digit to this value, so the final
+versionCode is build * 10 + lane.
+
 Examples:
     python3 update_version.py 1.7.5
     python3 update_version.py v1.7.5 --dry-run
-    python3 update_version.py 1.7.5 --build 176
+    python3 update_version.py 1.7.5 --build 10705
 """
 
 import argparse
@@ -18,23 +29,41 @@ APP_DART = ROOT / "lib" / "foundation" / "app.dart"
 
 PUBSPEC_VERSION_RE = re.compile(r"^version:[ \t]*([^\r\n]+)", re.MULTILINE)
 APP_VERSION_RE = re.compile(r'(final version = ")([^"]*)(";)')
+APP_BUILD_RE = re.compile(r'(final buildNumber = ")([^"]*)(";)')
 
 VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:\+(\d+))?$")
+
+# Android uses build * 10 + lane and Google Play caps versionCode at
+# 2,100,000,000, so the base build number cannot exceed this value.
+MAX_BUILD = (2_100_000_000 - 9) // 10
+
+
+def derive_build(major, minor, patch):
+    if minor >= 100 or patch >= 100:
+        raise ValueError("minor and patch must be less than 100")
+    return major * 10000 + minor * 100 + patch
 
 
 def parse_version(value):
     match = VERSION_RE.fullmatch(value.strip())
     if not match:
         raise ValueError(
-            "invalid version: expected 1.7.5, v1.7.5, or 1.7.5+175"
+            "invalid version: expected 1.7.5, v1.7.5, or 1.7.5+10705"
         )
 
     major, minor, patch, build = match.groups()
-    version = f"{int(major)}.{int(minor)}.{int(patch)}"
-    # Keep the repository convention: 1.7.5 -> 175.
-    build = int(build) if build is not None else int(f"{major}{minor}{patch}")
+    major, minor, patch = int(major), int(minor), int(patch)
+    try:
+        derived_build = derive_build(major, minor, patch)
+    except ValueError as exc:
+        raise ValueError(f"invalid version: {exc}") from exc
+
+    version = f"{major}.{minor}.{patch}"
+    build = int(build) if build is not None else derived_build
     if build < 1:
         raise ValueError("build number must be greater than 0")
+    if build > MAX_BUILD:
+        raise ValueError(f"build number must not exceed {MAX_BUILD}")
     return version, build
 
 
@@ -51,12 +80,12 @@ def main():
     )
     parser.add_argument(
         "version",
-        help="new version, e.g. 1.7.5, v1.7.5, or 1.7.5+175",
+        help="new version, e.g. 1.7.5, v1.7.5, or 1.7.5+10705",
     )
     parser.add_argument(
         "--build",
         type=int,
-        help="explicit build number (default: digits of the version, 1.7.5 -> 175)",
+        help="explicit build number (default: derived from the version, 1.7.5 -> 10705)",
     )
     parser.add_argument(
         "--dry-run",
@@ -73,6 +102,8 @@ def main():
     build = args.build if args.build is not None else derived_build
     if build < 1:
         parser.error("--build must be greater than 0")
+    if build > MAX_BUILD:
+        parser.error(f"--build must not exceed {MAX_BUILD}")
 
     if not PUBSPEC.is_file():
         raise SystemExit(f"File not found: {PUBSPEC}")
@@ -92,6 +123,11 @@ def main():
         raise SystemExit(f"Could not find the version constant in {APP_DART}")
     old_app_version = app_match.group(2)
 
+    build_match = APP_BUILD_RE.search(app_content)
+    if not build_match:
+        raise SystemExit(f"Could not find the build number constant in {APP_DART}")
+    old_app_build = build_match.group(2)
+
     new_pubspec_version = f"{version}+{build}"
 
     pubspec_updated = replace_once(
@@ -106,9 +142,15 @@ def main():
         app_content,
         APP_DART,
     )
+    app_updated = replace_once(
+        APP_BUILD_RE,
+        rf'\g<1>{build}\g<3>',
+        app_updated,
+        APP_DART,
+    )
 
-    print(f"pubspec.yaml:       {old_pubspec_version} -> {new_pubspec_version}")
-    print(f"lib/foundation/app.dart: {old_app_version} -> {version}")
+    print(f"pubspec.yaml:            {old_pubspec_version} -> {new_pubspec_version}")
+    print(f"lib/foundation/app.dart: {old_app_version}+{old_app_build} -> {version}+{build}")
 
     current_build = old_pubspec_version.rsplit("+", 1)[-1]
     if current_build.isdigit() and build <= int(current_build):

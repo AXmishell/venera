@@ -37,7 +37,7 @@ class _AboutSettingsState extends State<AboutSettings> {
           children: [
             const SizedBox(height: 8),
             Text(
-              "V${App.version}",
+              "V${App.version}+${App.buildNumber}",
               style: const TextStyle(fontSize: 16),
             ),
             Text(
@@ -85,7 +85,14 @@ Future<bool> checkUpdate() async {
   if (res.statusCode == 200) {
     var data = loadYaml(res.data);
     if (data["version"] != null) {
-      return _compareVersion(data["version"].split("+")[0], App.version);
+      var remote = data["version"].toString().split("+");
+      var remoteVersion = remote[0];
+      var remoteBuild = remote.length > 1 ? int.tryParse(remote[1]) ?? 0 : 0;
+      var localBuild = int.tryParse(App.buildNumber) ?? 0;
+      if (_compareVersion(remoteVersion, App.version)) {
+        return true;
+      }
+      return remoteVersion == App.version && remoteBuild > localBuild;
     }
   }
   return false;
@@ -129,13 +136,16 @@ Future<void> checkUpdateUi([bool showMessageIfNoUpdate = true, bool delay = fals
 
 /// return true if version1 > version2
 bool _compareVersion(String version1, String version2) {
-  var v1 = version1.split(".");
-  var v2 = version2.split(".");
-  for (var i = 0; i < v1.length; i++) {
-    if (int.parse(v1[i]) > int.parse(v2[i])) {
+  var v1 = version1.split(".").map(int.parse).toList();
+  var v2 = version2.split(".").map(int.parse).toList();
+  var length = v1.length > v2.length ? v1.length : v2.length;
+  for (var i = 0; i < length; i++) {
+    var value1 = i < v1.length ? v1[i] : 0;
+    var value2 = i < v2.length ? v2[i] : 0;
+    if (value1 > value2) {
       return true;
     }
-    if (int.parse(v1[i]) < int.parse(v2[i])) {
+    if (value1 < value2) {
       return false;
     }
   }

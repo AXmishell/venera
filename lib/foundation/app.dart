@@ -14,6 +14,7 @@ export "context.dart";
 
 class _App {
   final version = "1.7.9";
+  final buildNumber = "10709";
 
   bool get isAndroid => Platform.isAndroid;
 

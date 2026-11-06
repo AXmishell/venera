@@ -73,9 +73,14 @@ def update_json_file_release(json_file, latest_release):
     assets = latest_release.get("assets", [])
     download_url = None
     size = None
+    # The workflow names the IPA after the full pubspec version, e.g.
+    # veneraGo-ios-1.7.9+10709.ipa. Do not derive the build number from the
+    # version: it may be set explicitly and will not match the digits.
+    ipa_pattern = re.compile(
+        rf"^veneraGo-ios-{re.escape(version)}\+(\d+)\.ipa$"
+    )
     for asset in assets:
-        # veneraGo-ios-1.4.5+145.ipa
-        if asset["name"] == f"veneraGo-ios-{version}+{version.replace('.', '')}.ipa":
+        if ipa_pattern.match(asset["name"]):
             download_url = asset["browser_download_url"]
             size = asset["size"]
             break

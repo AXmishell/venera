@@ -9,7 +9,21 @@ permissions:
   contents: read
 
 jobs:
+  Check_Version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate version and build number
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            python3 check_version.py --tag "${{ github.ref_name }}"
+          else
+            python3 check_version.py --skip-tags
+          fi
   Build_MacOS:
+    needs: Check_Version
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -47,6 +61,7 @@ jobs:
           name: macos_build
           path: result/
   Build_IOS:
+    needs: Check_Version
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -74,6 +89,7 @@ jobs:
           name: ios_build
           path: result/
   Build_Android:
+    needs: Check_Version
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -164,6 +180,7 @@ jobs:
           name: apks
           path: build/app/outputs/apk/release
   Build_Windows:
+    needs: Check_Version
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -187,6 +204,7 @@ jobs:
           name: windows_build
           path: build/windows/veneraGo-*
   Build_Linux:
+    needs: Check_Version
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -225,6 +243,7 @@ jobs:
           name: arch_build
           path: build/linux/arch/
   Build_Linux_ARM64:
+    needs: Check_Version
     runs-on: ubuntu-22.04-arm
     steps:
       - uses: actions/checkout@v4
@@ -248,9 +267,9 @@ jobs:
 
   Release:
     runs-on: ubuntu-22.04
-    needs: [Build_MacOS, Build_IOS, Build_Android, Build_Windows, Build_Linux, Build_Linux_ARM64]
+    needs: [Check_Version, Build_MacOS, Build_IOS, Build_Android, Build_Windows, Build_Linux, Build_Linux_ARM64]
     # 任一平台失败时仍然收集已成功的产物，但不要在整个流程被取消时发布
-    if: ${{ !cancelled() && github.event_name == 'release' }}
+    if: ${{ needs.Check_Version.result == 'success' && !cancelled() && github.event_name == 'release' }}
     permissions:
       contents: write
     steps:

@@ -5,7 +5,14 @@ plugins {
     id "dev.flutter.flutter-gradle-plugin"
 }
 
+// versionCode = build number * 10 + lane.
+// Universal must be higher than the ABI splits so it can replace them, and
+// debug must be higher than every release lane so debug builds can upgrade
+// release installs that use the same signing key.
 ext.abiCodes = ["armeabi-v7a": 1, "arm64-v8a": 2, "x86_64": 3]
+ext.profileCode = 7
+ext.universalCode = 8
+ext.debugCode = 9
 
 def localProperties = new Properties()
 def localPropertiesFile = rootProject.file("local.properties")
@@ -15,14 +22,38 @@ if (localPropertiesFile.exists()) {
     }
 }
 
-def flutterVersionCode = localProperties.getProperty("flutter.versionCode")
-if (flutterVersionCode == null) {
-    flutterVersionCode = "1"
+// pubspec.yaml is the single source of truth. Never fall back to a default
+// versionCode: an APK built with versionCode 1 cannot upgrade anything and
+// the mistake is only visible after it has been published.
+def pubspecFile = rootProject.file("../pubspec.yaml")
+def flutterVersionName = null
+def flutterVersionCode = null
+if (pubspecFile.exists()) {
+    def versionMatcher = pubspecFile.text =~ /(?m)^version:[ \t]*(\d+\.\d+\.\d+)(?:\+(\d+))?[ \t]*$/
+    if (versionMatcher.find()) {
+        flutterVersionName = versionMatcher.group(1)
+        if (versionMatcher.group(2) != null) {
+            flutterVersionCode = versionMatcher.group(2)
+        }
+    }
 }
-
-def flutterVersionName = localProperties.getProperty("flutter.versionName")
 if (flutterVersionName == null) {
-    flutterVersionName = "1.0"
+    // Only used when pubspec.yaml is unavailable (e.g. a partial IDE sync).
+    flutterVersionName = localProperties.getProperty("flutter.versionName")
+    flutterVersionCode = localProperties.getProperty("flutter.versionCode")
+}
+if (flutterVersionName == null) {
+    throw new GradleException(
+        "Cannot determine versionName: expected 'version: X.Y.Z+N' in ${pubspecFile}"
+    )
+}
+if (flutterVersionCode == null
+        || !flutterVersionCode.toString().isInteger()
+        || flutterVersionCode.toInteger() < 1) {
+    throw new GradleException(
+        "Cannot determine versionCode: add a build number to pubspec.yaml, " +
+        "for example 'version: 1.7.9+10709'."
+    )
 }
 
 def keystorePropertiesFile = rootProject.file("key.properties")
@@ -111,10 +142,12 @@ android {
                     }
                 } else {
                     outputFileName = "veneraGo-${variant.versionName}.apk"
-                    versionCodeOverride = variant.versionCode * 10
+                    versionCodeOverride = variant.versionCode * 10 + project.ext.universalCode
                 }
             } else if (variant.buildType.name == "debug") {
-                versionCodeOverride = variant.versionCode * 10 + 4
+                versionCodeOverride = variant.versionCode * 10 + project.ext.debugCode
+            } else {
+                versionCodeOverride = variant.versionCode * 10 + project.ext.profileCode
             }
         }
     }

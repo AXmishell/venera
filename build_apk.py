@@ -32,7 +32,12 @@ def read_version():
         raise SystemExit(f"Could not read 'version:' from {PUBSPEC}")
 
     version, build = match.groups()
-    return version, int(build) if build else None
+    if build is None:
+        raise SystemExit(
+            "pubspec.yaml version must include a build number, "
+            "e.g. 'version: 1.7.9+10709'"
+        )
+    return version, int(build)
 
 
 def read_key_properties():
@@ -204,7 +209,7 @@ def main():
 
     version, build = read_version()
     build_type = "debug" if args.debug else "release"
-    print(f"veneraGo {version}" + (f"+{build}" if build else ""))
+    print(f"veneraGo {version}+{build}")
 
     if build_type == "release":
         validate_signing()
