@@ -146,13 +146,30 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
       ) !=
       false;
 
+  /// A tap that lands right after a drag is almost always part of that drag
+  /// gesture (for example the finger of a fling being lifted), so it must not
+  /// toggle the bars again after they were hidden automatically.
+  ///
+  /// Only the continuous mode has a similar guard built in
+  /// (`delayedIsScrolling`); gallery mode needs this one as well.
+  static const _kTapProtectionDuration = Duration(milliseconds: 300);
+
+  bool _userScrollInProgress = false;
+
+  DateTime? _lastUserScrollAt;
+
+  bool get isTapProtected =>
+      autoHideBarsOnScroll &&
+      _lastUserScrollAt != null &&
+      DateTime.now().difference(_lastUserScrollAt!) <
+          _kTapProtectionDuration;
+
   /// Hide the bars when the user drags the comic.
   ///
   /// Only scrolls caused by a user drag trigger this: notifications coming
   /// from programmatic scrolls (slider, chapter jump, auto page turning) have
   /// a null `dragDetails` and are ignored, so the bars stay visible.
   bool onScrollNotification(ScrollNotification notification) {
-    if (!_isOpen) return false;
     final isUserDrag =
         (notification is ScrollStartNotification &&
             notification.dragDetails != null) ||
@@ -160,6 +177,20 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
             notification.dragDetails != null) ||
         (notification is OverscrollNotification &&
             notification.dragDetails != null);
+
+    // Track the whole user scroll session (drag + fling) so taps that end the
+    // gesture are ignored. Programmatic scrolls never start a session.
+    if (isUserDrag) {
+      _userScrollInProgress = true;
+    }
+    if (_userScrollInProgress) {
+      _lastUserScrollAt = DateTime.now();
+      if (notification is ScrollEndNotification) {
+        _userScrollInProgress = false;
+      }
+    }
+
+    if (!_isOpen) return false;
     if (isUserDrag && autoHideBarsOnScroll) {
       closeBars();
     }

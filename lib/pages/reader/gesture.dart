@@ -173,6 +173,13 @@ class _ReaderGestureDetectorState extends AutomaticGlobalState<_ReaderGestureDet
       _longPressInProgress = false;
       return;
     }
+    // Ignore taps that belong to a just finished scroll gesture. Otherwise the
+    // swipe that auto hides the bars in gallery mode would immediately toggle
+    // them back on.
+    if (context.readerScaffold.isTapProtected) {
+      _previousEvent = null;
+      return;
+    }
     final location = event.globalPosition;
     if (!_enableDoubleTapToZoom) {
       onTap(location);
