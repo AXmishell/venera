@@ -31,7 +31,7 @@ def main():
     if not os.path.isdir(release_dir) or not os.listdir(release_dir):
         raise SystemExit(f"Missing or empty build output: {release_dir}")
 
-    zip_base = os.path.join("build", "windows", f"VeneraGo-{version}-windows")
+    zip_base = os.path.join("build", "windows", f"veneraGo-{version}-windows")
     zip_path = f"{zip_base}.zip"
     if os.path.exists(zip_path):
         os.remove(zip_path)
@@ -60,7 +60,7 @@ def main():
         subprocess.run("iscc windows/build.iss", shell=True, check=True)
 
         installer = os.path.join(
-            "build", "windows", f"VeneraGo-{version}-windows-installer.exe"
+            "build", "windows", f"veneraGo-{version}-windows-installer.exe"
         )
         require_non_empty_file(installer)
     finally:

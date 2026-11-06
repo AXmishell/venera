@@ -4,12 +4,12 @@
 1. 增加了连续章节自动加载（不用再点击下一章了）
 2. 优化流畅度
 
-# VeneraGo
+# veneraGo
 [![flutter](https://img.shields.io/badge/flutter-3.41.4-blue)](https://flutter.dev/)
-[![License](https://img.shields.io/github/license/venera-app/venera)](https://github.com/venera-app/venera/blob/master/LICENSE)
-[![stars](https://img.shields.io/github/stars/venera-app/venera?style=flat)](https://github.com/venera-app/venera/stargazers)
+[![License](https://img.shields.io/github/license/AXmishell/veneraGo)](https://github.com/AXmishell/veneraGo/blob/master/LICENSE)
+[![stars](https://img.shields.io/github/stars/AXmishell/veneraGo?style=flat)](https://github.com/AXmishell/veneraGo/stargazers)
 
-[![Download](https://img.shields.io/github/v/release/venera-app/venera)](https://github.com/venera-app/venera/releases)
+[![Download](https://img.shields.io/github/v/release/AXmishell/veneraGo)](https://github.com/AXmishell/veneraGo/releases)
 [![AUR Version](https://img.shields.io/aur/version/venera-bin)](https://aur.archlinux.org/packages/venera-bin)
 [![F-Droid Version](https://img.shields.io/f-droid/v/com.github.wgh136.venera)](https://f-droid.org/packages/com.github.wgh136.venera/)
 

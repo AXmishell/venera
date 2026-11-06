@@ -74,8 +74,8 @@ def update_json_file_release(json_file, latest_release):
     download_url = None
     size = None
     for asset in assets:
-        # VeneraGo-ios-1.4.5+145.ipa
-        if asset["name"] == f"VeneraGo-ios-{version}+{version.replace('.', '')}.ipa":
+        # veneraGo-ios-1.4.5+145.ipa
+        if asset["name"] == f"veneraGo-ios-{version}+{version.replace('.', '')}.ipa":
             download_url = asset["browser_download_url"]
             size = asset["size"]
             break
@@ -113,13 +113,13 @@ def update_json_file_release(json_file, latest_release):
     date_string = date_obj.strftime("%d/%m/%y")
     news_entry = {
         "appID": "com.github.wgh136.venera",
-        "caption": f"Update of VeneraGo just got released!",
+        "caption": f"Update of veneraGo just got released!",
         "date": latest_release["published_at"],
         "identifier": news_identifier,
         "notify": True,
         "tintColor": "#0784FC",
-        "title": f"{full_version} - VeneraGo  {date_string}",
-        "url": f"https://github.com/venera-app/venera/releases/tag/{tag}"
+        "title": f"{full_version} - veneraGo  {date_string}",
+        "url": f"https://github.com/AXmishell/veneraGo/releases/tag/{tag}"
     }
 
     news_entry_exists = any(item["identifier"] == news_identifier for item in data["news"])
@@ -135,7 +135,7 @@ def update_json_file_release(json_file, latest_release):
         raise
 
 def main():
-    repo_url = "venera-app/venera"
+    repo_url = "AXmishell/veneraGo"
     is_nightly = "NIGHTLY_LINK" in os.environ
 
     try:

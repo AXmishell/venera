@@ -31,15 +31,15 @@ jobs:
         run: |
           mkdir -p dist
           mkdir -p dist/dmg_contents
-          cp -R build/macos/Build/Products/Release/VeneraGo.app dist/dmg_contents/
+          cp -R build/macos/Build/Products/Release/veneraGo.app dist/dmg_contents/
           ln -s /Applications dist/dmg_contents/Applications
-          hdiutil create -volname "VeneraGo" -srcfolder dist/dmg_contents -ov -format UDZO "dist/VeneraGo.dmg"
+          hdiutil create -volname "veneraGo" -srcfolder dist/dmg_contents -ov -format UDZO "dist/veneraGo.dmg"
 
       - name: Add version to filename
         run: |
           APP_VERSION=$(grep "version:" pubspec.yaml | cut -d':' -f2 | tr -d ' ')
           mkdir -p result
-          mv dist/VeneraGo.dmg "result/VeneraGo-${APP_VERSION}.dmg"
+          mv dist/veneraGo.dmg "result/veneraGo-${APP_VERSION}.dmg"
 
       - name: Upload DMG
         uses: actions/upload-artifact@v4
@@ -60,15 +60,15 @@ jobs:
       - run: flutter build ios --release --no-codesign
       - run: |
           cd "$GITHUB_WORKSPACE/build/ios/iphoneos"
-          rm -rf Payload VeneraGo-ios.ipa
+          rm -rf Payload veneraGo-ios.ipa
           mkdir Payload
           mv Runner.app Payload/
-          zip -r VeneraGo-ios.ipa Payload
+          zip -r veneraGo-ios.ipa Payload
       - name: Add version to filename
         run: |
           APP_VERSION=$(grep "version:" pubspec.yaml | cut -d':' -f2 | tr -d ' ')
           mkdir -p result
-          mv build/ios/iphoneos/VeneraGo-ios.ipa "result/VeneraGo-ios-${APP_VERSION}.ipa"
+          mv build/ios/iphoneos/veneraGo-ios.ipa "result/veneraGo-ios-${APP_VERSION}.ipa"
       - uses: actions/upload-artifact@v4
         with:
           name: ios_build
@@ -185,7 +185,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows_build
-          path: build/windows/VeneraGo-*
+          path: build/windows/veneraGo-*
   Build_Linux:
     runs-on: ubuntu-22.04
     steps:
@@ -202,14 +202,14 @@ jobs:
       - run: python3 debian/build.py x64
       # flutter_to_arch derives the executable name from the Dart package name
       # ("venera"), so provide a hard link for packaging while the real binary
-      # keeps the VeneraGo name.
-      - run: ln -f build/linux/x64/release/bundle/VeneraGo build/linux/x64/release/bundle/venera
+      # keeps the veneraGo name.
+      - run: ln -f build/linux/x64/release/bundle/veneraGo build/linux/x64/release/bundle/venera
       - run: dart run flutter_to_arch
       - name: Rename Arch package
         run: |
           for f in build/linux/arch/venera-*.pkg.tar.zst; do
             [ -e "$f" ] || continue
-            mv "$f" "${f/\/venera-/\/VeneraGo-}"
+            mv "$f" "${f/\/venera-/\/veneraGo-}"
           done
       - run: |
           sudo rm -rf build/linux/arch/app.tar.gz

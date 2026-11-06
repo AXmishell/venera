@@ -1,5 +1,5 @@
 flutter_app: 
-  command: VeneraGo
+  command: veneraGo
   arch: {{Arch}}
   parent: /usr/local/lib
   nonInteractive: true
@@ -11,7 +11,7 @@ control:
   Priority: optional
   Depends: libwebkit2gtk-4.1-0, libgtk-3-0
   Maintainer: nyne
-  Description: VeneraGo
+  Description: veneraGo
   
 #options:
 #  exec_out_dir: debian/packages
