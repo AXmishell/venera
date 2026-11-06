@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the Android APK(s) for Venera.
+"""Build the Android APK(s) for VeneraGo.
 
 Examples:
     python3 build_apk.py
@@ -181,7 +181,7 @@ def copy_apks(apks, destination):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Build the Venera Android APK(s).")
+    parser = argparse.ArgumentParser(description="Build the VeneraGo Android APK(s).")
     parser.add_argument(
         "--debug",
         action="store_true",
@@ -204,7 +204,7 @@ def main():
 
     version, build = read_version()
     build_type = "debug" if args.debug else "release"
-    print(f"Venera {version}" + (f"+{build}" if build else ""))
+    print(f"VeneraGo {version}" + (f"+{build}" if build else ""))
 
     if build_type == "release":
         validate_signing()

@@ -141,7 +141,7 @@
     "User": "用户",
     "Language": "语言",
     "Proxy": "代理",
-    "Venera is a free and open-source app for comic reading.": "Venera是一个免费的开源漫画阅读应用。",
+    "VeneraGo is a free and open-source app for comic reading.": "VeneraGo是一个免费的开源漫画阅读应用。",
     "Check for updates": "检查更新",
     "Check": "检查",
     "Network Favorite Pages": "网络收藏页面",
@@ -440,7 +440,7 @@
     "Enable device specific settings": "启用此设备特定设置",
     "Ignore Certificate Errors": "忽略证书错误",
     "Mouse scroll speed": "鼠标滚动速度",
-    "Continuous mode auto-load next chapter": "连续模式自动加载下一章",
+    "Auto-load next chapter": "自动加载下一章",
     "Automatically load the next chapter while scrolling": "滚动到章节末尾时自动加载下一章"
   },
   "zh_TW": {
@@ -584,7 +584,7 @@
     "User": "使用者",
     "Language": "語言",
     "Proxy": "代理",
-    "Venera is a free and open-source app for comic reading.": "Venera是一個免費的開源漫畫閱讀應用。",
+    "VeneraGo is a free and open-source app for comic reading.": "VeneraGo是一個免費的開源漫畫閱讀應用。",
     "Check for updates": "檢查更新",
     "Check": "檢查",
     "Network Favorite Pages": "網路收藏頁面",
@@ -884,7 +884,7 @@
     "Enable device specific settings": "啟用此裝置特定設定",
     "Ignore Certificate Errors": "忽略證書錯誤",
     "Mouse scroll speed": "滑鼠滾動速度",
-    "Continuous mode auto-load next chapter": "連續模式自動載入下一章",
+    "Auto-load next chapter": "自動載入下一章",
     "Automatically load the next chapter while scrolling": "捲動到章節末尾時自動載入下一章"
   }
 }

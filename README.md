@@ -4,7 +4,7 @@
 1. 增加了连续章节自动加载（不用再点击下一章了）
 2. 优化流畅度
 
-# venera
+# VeneraGo
 [![flutter](https://img.shields.io/badge/flutter-3.41.4-blue)](https://flutter.dev/)
 [![License](https://img.shields.io/github/license/venera-app/venera)](https://github.com/venera-app/venera/blob/master/LICENSE)
 [![stars](https://img.shields.io/github/stars/venera-app/venera?style=flat)](https://github.com/venera-app/venera/stargazers)

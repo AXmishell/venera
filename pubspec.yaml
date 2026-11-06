@@ -107,7 +107,7 @@ flutter:
 # fonts:
 
 flutter_to_arch:
-  name: Venera
+  name: VeneraGo
   icon: debian/gui/venera.png
   categories: Utility
   keywords: Flutter;comic;images;

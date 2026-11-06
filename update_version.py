@@ -47,7 +47,7 @@ def replace_once(pattern, replacement, content, path):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Update the Venera app version."
+        description="Update the VeneraGo app version."
     )
     parser.add_argument(
         "version",
