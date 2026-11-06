@@ -129,7 +129,29 @@ jobs:
             exit 1
           fi
 
-          keytool -list -keystore "$STORE_PATH" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
+          KEYSTORE_INFO=$(keytool -list -keystore "$STORE_PATH" -storepass "$STORE_PASSWORD" 2>&1) || {
+            echo "::error::Cannot open keystore $STORE_PATH with the configured storePassword"
+            echo "$KEYSTORE_INFO"
+            exit 1
+          }
+
+          # PKCS12 keystores cannot store a key password different from the store
+          # password. keytool silently ignores -keypass for them, so `-certreq`
+          # below would "validate" a wrong keyPassword and Gradle would only fail
+          # later, after a 15 minute build, in :app:packageRelease.
+          if echo "$KEYSTORE_INFO" | grep -q 'PKCS12' && [ "$STORE_PASSWORD" != "$KEY_PASSWORD" ]; then
+            echo "::error::PKCS12 keystore does not support keyPassword != storePassword"
+            echo "::error::Set keyPassword equal to storePassword in ANDROID_KEY_PROPERTIES, or convert the keystore to JKS"
+            exit 1
+          fi
+
+          if ! keytool -list -keystore "$STORE_PATH" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null 2>&1; then
+            echo "::error::Alias $KEY_ALIAS not found in $STORE_PATH"
+            exit 1
+          fi
+
+          # For JKS this actually decrypts the key with keyPassword; for PKCS12 the
+          # equality check above is what guarantees the key password is correct.
           keytool -certreq -alias "$KEY_ALIAS" -keystore "$STORE_PATH" -storepass "$STORE_PASSWORD" -keypass "$KEY_PASSWORD" -file /dev/null >/dev/null
 
           echo "Android signing configuration validated."

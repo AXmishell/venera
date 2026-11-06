@@ -9,6 +9,7 @@ Examples:
 """
 
 import argparse
+import os
 import re
 import shutil
 import subprocess
@@ -34,14 +35,7 @@ def read_version():
     return version, int(build) if build else None
 
 
-def warn_if_debug_signed():
-    """Warn when a release build would use the debug signing key."""
-    if not KEY_PROPERTIES.is_file():
-        raise SystemExit(
-            f"Missing signing config: {KEY_PROPERTIES}\n"
-            "Create it with storeFile/storePassword/keyAlias/keyPassword."
-        )
-
+def read_key_properties():
     properties = {}
     for line in KEY_PROPERTIES.read_text(encoding="utf-8").splitlines():
         line = line.strip()
@@ -49,15 +43,93 @@ def warn_if_debug_signed():
             continue
         key, value = line.split("=", 1)
         properties[key.strip()] = value.strip()
+    return properties
 
-    store_file = properties.get("storeFile")
-    if not store_file:
-        return
+
+def find_keytool():
+    keytool = shutil.which("keytool")
+    if keytool:
+        return keytool
+
+    java_home = os.environ.get("JAVA_HOME")
+    if java_home:
+        name = "keytool.exe" if os.name == "nt" else "keytool"
+        candidate = Path(java_home) / "bin" / name
+        if candidate.is_file():
+            return str(candidate)
+
+    raise SystemExit("keytool was not found; install a JDK or set JAVA_HOME")
+
+
+def validate_signing():
+    """Fail early if Gradle would not be able to sign the release APK."""
+    if not KEY_PROPERTIES.is_file():
+        raise SystemExit(
+            f"Missing signing config: {KEY_PROPERTIES}\n"
+            "Create it with storeFile/storePassword/keyAlias/keyPassword."
+        )
+
+    properties = read_key_properties()
+    missing = [
+        name
+        for name in ("storeFile", "storePassword", "keyAlias", "keyPassword")
+        if not properties.get(name)
+    ]
+    if missing:
+        raise SystemExit(f"Missing {', '.join(missing)} in {KEY_PROPERTIES}")
+
+    store_password = properties["storePassword"]
+    key_password = properties["keyPassword"]
+    key_alias = properties["keyAlias"]
 
     # Gradle resolves storeFile relative to android/app.
-    store_path = Path(store_file)
+    store_path = Path(properties["storeFile"])
     if not store_path.is_absolute():
         store_path = ROOT / "android" / "app" / store_path
+    if not store_path.is_file() or store_path.stat().st_size == 0:
+        raise SystemExit(f"Keystore not found or empty: {store_path}")
+
+    keytool = find_keytool()
+    listing = subprocess.run(
+        [keytool, "-list", "-keystore", str(store_path), "-storepass", store_password],
+        capture_output=True,
+        text=True,
+    )
+    output = f"{listing.stdout}\n{listing.stderr}"
+    if listing.returncode != 0:
+        raise SystemExit(
+            f"Cannot open keystore {store_path} with the configured "
+            f"storePassword:\n{output.strip()}"
+        )
+
+    # PKCS12 keystores cannot store a key password different from the store
+    # password, and keytool silently ignores -keypass for them. Without this
+    # check a wrong keyPassword only fails later in :app:packageRelease with
+    # "Get Key failed: Given final block not properly padded".
+    if "PKCS12" in output and key_password != store_password:
+        raise SystemExit(
+            "PKCS12 keystore does not support keyPassword != storePassword.\n"
+            f"Set keyPassword equal to storePassword in {KEY_PROPERTIES}, "
+            "or convert the keystore to JKS."
+        )
+
+    alias_check = subprocess.run(
+        [
+            keytool,
+            "-list",
+            "-keystore",
+            str(store_path),
+            "-storepass",
+            store_password,
+            "-alias",
+            key_alias,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if alias_check.returncode != 0:
+        detail = f"{alias_check.stdout}\n{alias_check.stderr}".strip()
+        raise SystemExit(f"Alias {key_alias} not found in {store_path}:\n{detail}")
 
     if "debug" in store_path.name.lower():
         print(
@@ -65,6 +137,8 @@ def warn_if_debug_signed():
             f"({store_path}); configure a release keystore before publishing.",
             file=sys.stderr,
         )
+
+    print(f"Signing configuration validated: {store_path.name} (alias {key_alias})")
 
 
 def run(command):
@@ -133,7 +207,7 @@ def main():
     print(f"Venera {version}" + (f"+{build}" if build else ""))
 
     if build_type == "release":
-        warn_if_debug_signed()
+        validate_signing()
 
     if not args.no_pub_get:
         run(["flutter", "pub", "get"])
