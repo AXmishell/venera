@@ -103,11 +103,10 @@ void passCloudflare(CloudflareException e, void Function() onFinished) async {
   var uri = Uri.parse(url);
 
   void saveCookies(Map<String, String> cookies) {
+    // Do not derive a registrable domain by taking the last two labels:
+    // that breaks for public suffixes like "co.uk" and for IP addresses.
+    // The challenge was served by this exact host, so scope the cookies to it.
     var domain = uri.host;
-    var splits = domain.split('.');
-    if (splits.length > 1) {
-      domain = ".${splits[splits.length - 2]}.${splits[splits.length - 1]}";
-    }
     SingleInstanceCookieJar.instance!.saveFromResponse(
       uri,
       List<io.Cookie>.generate(cookies.length, (index) {

@@ -151,13 +151,26 @@ abstract class CBZ {
       }
     } else {
       dest.createSync();
-      var chapters = <String, List<File>>{};
+      var chapterEntries = <MapEntry<String, List<File>>>[];
       for (var chapter in metaData.chapters!) {
-        chapters[chapter.title] = files.sublist(chapter.start - 1, chapter.end);
+        if (chapter.start < 1 ||
+            chapter.end < chapter.start ||
+            chapter.end > files.length) {
+          throw Exception(
+            'Invalid chapter range ${chapter.start}-${chapter.end} '
+            'for ${files.length} images',
+          );
+        }
+        chapterEntries.add(
+          MapEntry(
+            chapter.title,
+            files.sublist(chapter.start - 1, chapter.end),
+          ),
+        );
       }
       int i = 0;
       cpMap = <String, String>{};
-      for (var chapter in chapters.entries) {
+      for (var chapter in chapterEntries) {
         cpMap[i.toString()] = chapter.key;
         var chapterDir = Directory(FilePath.join(dest.path, i.toString()));
         chapterDir.createSync();
@@ -167,6 +180,7 @@ abstract class CBZ {
               chapterDir.path, '${i + 1}.${src.path.split('.').last}'));
           await src.copyMem(dst.path);
         }
+        i++;
       }
     }
     var comic = LocalComic(
@@ -212,11 +226,12 @@ abstract class CBZ {
           comic.comicType,
           c,
         );
+        var start = allImages.length + 1;
         allImages.addAll(images);
         var chapter = ComicChapter(
           title: chapterName!,
-          start: chapters.length + 1,
-          end: chapters.length + images.length,
+          start: start,
+          end: allImages.length,
         );
         chapters.add(chapter);
       }

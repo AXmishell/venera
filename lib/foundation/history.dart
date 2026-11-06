@@ -190,7 +190,10 @@ class HistoryManager with ChangeNotifier {
 
   int get length => _db.select("select count(*) from history;").first[0] as int;
 
-  /// Cache of history ids. Improve the performance of find operation.
+  /// Cache of history keys. Improve the performance of find operation.
+  ///
+  /// The key contains both the comic id and the comic type, since different
+  /// sources may use the same comic id.
   Map<String, bool>? _cachedHistoryIds;
 
   /// Cache records recently modified by the app. Improve the performance of listeners.
@@ -198,15 +201,11 @@ class HistoryManager with ChangeNotifier {
 
   bool isInitialized = false;
 
-  Future<void> init() async {
-    if (isInitialized) {
-      return;
-    }
-    _db = sqlite3.open("${App.dataPath}/history.db");
+  static String _cacheKey(String id, int type) => jsonEncode([id, type]);
 
-    _db.execute("""
+  static const _createHistoryTableSql = """
         create table if not exists history  (
-          id text primary key,
+          id text not null,
           title text,
           subtitle text,
           cover text,
@@ -216,14 +215,59 @@ class HistoryManager with ChangeNotifier {
           page int,
           readEpisode text,
           max_page int,
-          chapter_group int
+          chapter_group int,
+          primary key (id, type)
         );
+      """;
+
+  /// Migrate the old schema, whose primary key only contained `id`.
+  void _migrateHistoryPrimaryKey() {
+    var columns = _db.select("PRAGMA table_info(history);");
+    var primaryKeyColumns = columns
+        .where((element) => (element["pk"] as int) > 0)
+        .map((element) => element["name"] as String)
+        .toList();
+    if (primaryKeyColumns.length == 2 &&
+        primaryKeyColumns.contains("id") &&
+        primaryKeyColumns.contains("type")) {
+      return;
+    }
+
+    _db.execute('BEGIN TRANSACTION;');
+    try {
+      _db.execute('ALTER TABLE history RENAME TO history_old;');
+      _db.execute(_createHistoryTableSql);
+      _db.execute("""
+        insert or replace into history
+          (id, title, subtitle, cover, time, type, ep, page, readEpisode, max_page, chapter_group)
+        select
+          id, title, subtitle, cover, time, type, ep, page, readEpisode, max_page, chapter_group
+        from history_old;
       """);
+      _db.execute('DROP TABLE history_old;');
+      _db.execute('COMMIT;');
+    } catch (e) {
+      _db.execute('ROLLBACK;');
+      rethrow;
+    }
+  }
+
+  Future<void> init() async {
+    if (isInitialized) {
+      return;
+    }
+    _db = sqlite3.open("${App.dataPath}/history.db");
+
+    _db.execute(_createHistoryTableSql);
 
     var columns = _db.select("PRAGMA table_info(history);");
+    if (!columns.any((element) => element["name"] == "type")) {
+      _db.execute("alter table history add column type int;");
+    }
     if (!columns.any((element) => element["name"] == "chapter_group")) {
       _db.execute("alter table history add column chapter_group int;");
     }
+    _migrateHistoryPrimaryKey();
 
     notifyListeners();
     ImageFavoriteManager().init();
@@ -263,18 +307,22 @@ class HistoryManager with ChangeNotifier {
     }
 
     _haveAsyncTask = true;
-    await _addHistoryAsync(_db.handle.address, newItem);
-    _haveAsyncTask = false;
-    if (_cachedHistoryIds == null) {
-      updateCache();
-    } else {
-      _cachedHistoryIds![newItem.id] = true;
+    try {
+      await _addHistoryAsync(_db.handle.address, newItem);
+      var key = _cacheKey(newItem.id, newItem.type.value);
+      if (_cachedHistoryIds == null) {
+        updateCache();
+      } else {
+        _cachedHistoryIds![key] = true;
+      }
+      cachedHistories[key] = newItem;
+      if (cachedHistories.length > 10) {
+        cachedHistories.remove(cachedHistories.keys.first);
+      }
+      notifyListeners();
+    } finally {
+      _haveAsyncTask = false;
     }
-    cachedHistories[newItem.id] = newItem;
-    if (cachedHistories.length > 10) {
-      cachedHistories.remove(cachedHistories.keys.first);
-    }
-    notifyListeners();
   }
 
   /// add history. if exists, update time.
@@ -294,12 +342,13 @@ class HistoryManager with ChangeNotifier {
       newItem.maxPage,
       newItem.group
     ]);
+    var key = _cacheKey(newItem.id, newItem.type.value);
     if (_cachedHistoryIds == null) {
       updateCache();
     } else {
-      _cachedHistoryIds![newItem.id] = true;
+      _cachedHistoryIds![key] = true;
     }
-    cachedHistories[newItem.id] = newItem;
+    cachedHistories[key] = newItem;
     if (cachedHistories.length > 10) {
       cachedHistories.remove(cachedHistories.keys.first);
     }
@@ -349,10 +398,14 @@ void clearUnfavoritedHistory() {
   void updateCache() {
     _cachedHistoryIds = {};
     var res = _db.select("""
-        select id from history;
+        select id, type from history;
       """);
     for (var element in res) {
-      _cachedHistoryIds![element["id"] as String] = true;
+      var type = element["type"];
+      if (type is! int) {
+        continue;
+      }
+      _cachedHistoryIds![_cacheKey(element["id"] as String, type)] = true;
     }
     for (var key in cachedHistories.keys.toList()) {
       if (!_cachedHistoryIds!.containsKey(key)) {
@@ -365,11 +418,12 @@ void clearUnfavoritedHistory() {
     if (_cachedHistoryIds == null) {
       updateCache();
     }
-    if (!_cachedHistoryIds!.containsKey(id)) {
+    var key = _cacheKey(id, type.value);
+    if (!_cachedHistoryIds!.containsKey(key)) {
       return null;
     }
-    if (cachedHistories.containsKey(id)) {
-      return cachedHistories[id];
+    if (cachedHistories.containsKey(key)) {
+      return cachedHistories[key];
     }
 
     var res = _db.select("""
@@ -410,6 +464,8 @@ void clearUnfavoritedHistory() {
 
   void close() {
     isInitialized = false;
+    _cachedHistoryIds = null;
+    cachedHistories.clear();
     _db.dispose();
   }
 

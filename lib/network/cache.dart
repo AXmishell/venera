@@ -80,23 +80,21 @@ class NetworkCacheManager implements Interceptor {
     if (options.method != "GET") {
       return handler.next(options);
     }
+    // This is an internal header used by this app, never send it to servers.
+    var cacheTime = options.headers.remove('cache-time');
     var cache = getCache(options.uri);
     if (cache == null ||
         !compareHeaders(options.headers, cache.requestHeaders)) {
-      if (options.headers['cache-time'] != null) {
-        options.headers.remove('cache-time');
-      }
       return handler.next(options);
     } else {
-      if (options.headers['cache-time'] == 'no') {
-        options.headers.remove('cache-time');
+      if (cacheTime == 'no') {
         removeCache(options.uri);
         return handler.next(options);
       }
     }
     var time = DateTime.now();
     var diff = time.difference(cache.time);
-    if (options.headers['cache-time'] == 'long' &&
+    if (cacheTime == 'long' &&
         diff < const Duration(hours: 6)) {
       return handler.resolve(Response(
         requestOptions: options,
@@ -148,12 +146,10 @@ class NetworkCacheManager implements Interceptor {
       'content-encoding',
       'report-to',
       'server-timing',
-      'token',
       'set-cookie',
       'cf-cache-status',
       'cf-request-id',
       'cf-ray',
-      'authorization',
     ];
     for (var key in shouldIgnore) {
       a.remove(key);

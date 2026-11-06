@@ -74,9 +74,10 @@ Future<File> createEpubComic(
       images.add('images/img$imgIndex.$ext');
       var mime = FileType.fromExtension(ext).mime;
       manifestStrBuilder.writeln(
-          '        <item id="img$imgIndex" href="OEBPS/images/img$imgIndex$ext" media-type="$mime"/>');
+          '        <item id="img$imgIndex" href="OEBPS/images/img$imgIndex.$ext" media-type="$mime"/>');
       imgIndex++;
     }
+    var escapedChapter = _escapeXml(chapter);
     var html =
         File(FilePath.join(workingDir.path, 'OEBPS', '$chapterIndex.html'));
     html.writeAsStringSync('''
@@ -84,7 +85,7 @@ Future<File> createEpubComic(
     "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
-    <title>$chapter</title>
+    <title>$escapedChapter</title>
     <style type="text/css">
         img { 
             max-width: 100%;
@@ -97,9 +98,9 @@ Future<File> createEpubComic(
     </style>
 </head>
 <body>
-    <h1>$chapter</h1>
+    <h1>$escapedChapter</h1>
     <div>
-${images.map((e) => '        <img src="$e" alt="$e"/>').join('\n')}
+${images.map((e) => '        <img src="${_escapeXml(e)}" alt="${_escapeXml(e)}"/>').join('\n')}
     </div>
 </body>
 </html>
@@ -123,8 +124,8 @@ ${images.map((e) => '        <img src="$e" alt="$e"/>').join('\n')}
     xmlns="http://www.idpf.org/2007/opf"
     xmlns:dc="http://purl.org/dc/elements/1.1/">
     <metadata>
-        <dc:title>${data.title}</dc:title>
-        <dc:creator>${data.author}</dc:creator>
+        <dc:title>${_escapeXml(data.title)}</dc:title>
+        <dc:creator>${_escapeXml(data.author)}</dc:creator>
         <dc:identifier id="book_id">urn:uuid:$uuid</dc:identifier>
         <meta name="cover" content="cover_image"/>
     </metadata>
@@ -146,7 +147,7 @@ ${spineStrBuilder.toString()}
     navMapStrBuilder
         .writeln('        <navPoint id="chapter$i" playOrder="$playOrder">');
     navMapStrBuilder.writeln(
-        '            <navLabel><text>${chapterNames[i]}</text></navLabel>');
+        '            <navLabel><text>${_escapeXml(chapterNames[i])}</text></navLabel>');
     navMapStrBuilder.writeln('            <content src="OEBPS/$i.html"/>');
     navMapStrBuilder.writeln('        </navPoint>');
     playOrder++;
@@ -163,7 +164,7 @@ ${spineStrBuilder.toString()}
         <meta name="dtb:maxPageNumber" content="0"/>
     </head>
     <docTitle>
-        <text>${data.title}</text>
+        <text>${_escapeXml(data.title)}</text>
     </docTitle>
     <navMap>
 ${navMapStrBuilder.toString()}
@@ -206,4 +207,13 @@ Future<File> createEpubWithLocalComic(
   return Isolate.run(() => overrideIO(() async {
         return createEpubComic(data, cacheDir, outFilePath);
       }));
+}
+
+String _escapeXml(String text) {
+  return text
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&apos;');
 }

@@ -259,8 +259,6 @@ class LocalFavoritesManager with ChangeNotifier {
             where id == ? and type == ?;
           """, [translatedTags, comic.id, comic.type.value]);
         }
-      } else {
-        break;
       }
     }
     await appdata.ensureInit();

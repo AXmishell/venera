@@ -198,7 +198,7 @@ class RHttpAdapter implements HttpClientAdapter {
   }
 
   static Map<String, List<String>> _getOverrides() {
-    if (!appdata.settings['enableDnsOverrides'] == true) {
+    if (appdata.settings['enableDnsOverrides'] != true) {
       return {};
     }
     var config = appdata.settings["dnsOverrides"];

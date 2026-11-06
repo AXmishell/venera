@@ -8,7 +8,7 @@ import 'package:venera/foundation/log.dart';
 class JSPool {
   static final int _maxInstances = 4;
   final List<IsolateJsEngine> _instances = [];
-  bool _isInitializing = false;
+  Future<void>? _initFuture;
 
   static final JSPool _singleton = JSPool._internal();
   factory JSPool() {
@@ -16,15 +16,23 @@ class JSPool {
   }
   JSPool._internal();
 
-  Future<void> init() async {
-    if (_isInitializing) return;
-    _isInitializing = true;
-    var jsInitBuffer = await rootBundle.load("assets/init.js");
-    var jsInit = jsInitBuffer.buffer.asUint8List();
-    for (int i = 0; i < _maxInstances; i++) {
-      _instances.add(IsolateJsEngine(jsInit));
+  Future<void> init() {
+    if (_instances.isNotEmpty) {
+      return Future.value();
     }
-    _isInitializing = false;
+    return _initFuture ??= _initialize();
+  }
+
+  Future<void> _initialize() async {
+    try {
+      var jsInitBuffer = await rootBundle.load("assets/init.js");
+      var jsInit = jsInitBuffer.buffer.asUint8List();
+      for (int i = 0; i < _maxInstances; i++) {
+        _instances.add(IsolateJsEngine(jsInit));
+      }
+    } finally {
+      _initFuture = null;
+    }
   }
 
   Future<dynamic> execute(String jsFunction, List<dynamic> args) async {

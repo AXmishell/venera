@@ -29,7 +29,8 @@ Future<void> _createPdfFromComic({
 
   void reorderFiles(List<FileSystemEntity> files) {
     files.removeWhere(
-        (element) => element is! File || element.path.startsWith('cover'));
+      (element) => element is! File || element.name.startsWith('cover'),
+    );
     files.sort((a, b) {
       var aName = (a as File).basenameWithoutExt;
       var bName = (b as File).basenameWithoutExt;
@@ -51,7 +52,9 @@ Future<void> _createPdfFromComic({
     }
   } else {
     for (var chapter in comic.downloadedChapters) {
-      var files = Directory(FilePath.join(baseDir, chapter)).listSync();
+      var files = Directory(
+        FilePath.join(baseDir, LocalManager.getChapterDirectoryName(chapter)),
+      ).listSync();
       reorderFiles(files);
       for (var file in files) {
         images.add(file.path);
@@ -70,72 +73,115 @@ Future<void> _createPdfFromComic({
 }
 
 Future<Isolate> _runIsolate(
-    LocalComic comic, String savePath, SendPort sendPort) {
+  LocalComic comic,
+  String savePath,
+  SendPort sendPort,
+) {
   var localPath = LocalManager().path;
   return Isolate.spawn<SendPort>(
-    (sendPort) => overrideIO(
-      () async {
-        if (App.isAndroid) {
-          await SAFTaskWorker().init();
+    (sendPort) => overrideIO(() async {
+      if (App.isAndroid) {
+        await SAFTaskWorker().init();
+      }
+      var receivePort = ReceivePort();
+      sendPort.send(receivePort.sendPort);
+
+      Completer<Image>? completer;
+
+      Future<Image> decodeImage(Uint8List data) async {
+        if (completer != null) {
+          throw Exception('Another image is being decoded');
         }
-        var receivePort = ReceivePort();
-        sendPort.send(receivePort.sendPort);
+        sendPort.send(data);
+        completer = Completer();
+        return completer!.future;
+      }
 
-        Completer<Image>? completer;
-
-        Future<Image> decodeImage(Uint8List data) async {
-          if (completer != null) {
-            throw Exception('Another image is being decoded');
+      receivePort.listen((message) {
+        if (message is Image) {
+          if (completer == null) {
+            return;
           }
-          sendPort.send(data);
-          completer = Completer();
-          return completer!.future;
+          completer!.complete(message);
+          completer = null;
+        } else if (message is List) {
+          if (completer == null) {
+            return;
+          }
+          completer!.completeError(
+            Exception(message.isEmpty ? 'Failed to decode image' : message[0]),
+          );
+          completer = null;
         }
+      });
 
-        receivePort.listen((message) {
-          if (message is Image) {
-            if (completer == null) {
-              throw Exception('No image is being decoded');
-            }
-            completer!.complete(message);
-            completer = null;
-          }
-        });
+      await _createPdfFromComic(
+        comic: comic,
+        savePath: savePath,
+        localPath: localPath,
+        decodeImage: decodeImage,
+      );
 
-        await _createPdfFromComic(
-          comic: comic,
-          savePath: savePath,
-          localPath: localPath,
-          decodeImage: decodeImage,
-        );
-
-        sendPort.send(null);
-      },
-    ),
+      receivePort.close();
+      sendPort.send(null);
+    }),
     sendPort,
+    onError: sendPort,
+    errorsAreFatal: true,
   );
 }
 
-Future<File> createPdfFromComicIsolate(LocalComic comic, String savePath) async {
+Future<File> createPdfFromComicIsolate(
+  LocalComic comic,
+  String savePath,
+) async {
   var receivePort = ReceivePort();
   SendPort? sendPort;
   Isolate? isolate;
   var completer = Completer<void>();
+
+  void finish([Object? error, StackTrace? stackTrace]) {
+    if (completer.isCompleted) {
+      return;
+    }
+    if (error != null) {
+      completer.completeError(error, stackTrace);
+    } else {
+      completer.complete();
+    }
+  }
+
   receivePort.listen((message) {
     if (message is SendPort) {
       sendPort = message;
     } else if (message is Uint8List) {
-      Image.decodeImage(message).then((image) {
-        sendPort!.send(image);
-      });
-    } else if (message == null) {
+      Image.decodeImage(message).then(
+        (image) => sendPort?.send(image),
+        onError: (e, s) => sendPort?.send(["$e", "$s"]),
+      );
+    } else if (message is List) {
+      finish(
+        message.isEmpty ? Exception('PDF generation failed') : message[0],
+        message.length > 1
+            ? StackTrace.fromString(message[1].toString())
+            : null,
+      );
       receivePort.close();
-      completer.complete();
-      isolate!.kill();
+      isolate?.kill(priority: Isolate.immediate);
+    } else if (message == null) {
+      finish();
+      receivePort.close();
+      isolate?.kill(priority: Isolate.immediate);
     }
   });
-  isolate = await _runIsolate(comic, savePath, receivePort.sendPort);
-  await completer.future;
+
+  try {
+    isolate = await _runIsolate(comic, savePath, receivePort.sendPort);
+    await completer.future;
+  } finally {
+    receivePort.close();
+    isolate?.kill(priority: Isolate.immediate);
+  }
   return File(savePath);
 }
 
@@ -366,8 +412,9 @@ class PdfGenerator {
         add(unit);
       } else if (unit > unicodePlaneOneMax && unit <= unicodeValidRangeMax) {
         final base = unit - unicodeUtf16Offset;
-        add(unicodeUtf16SurrogateUnit0Base +
-            ((base & unicodeUtf16HiMask) >> 10));
+        add(
+          unicodeUtf16SurrogateUnit0Base + ((base & unicodeUtf16HiMask) >> 10),
+        );
         add(unicodeUtf16SurrogateUnit1Base + (base & unicodeUtf16LoMask));
       } else {
         add(unicodeReplacementCharacterCodePoint);
@@ -389,7 +436,8 @@ class PdfGenerator {
   }
 
   Future<({int width, int height, Uint8List data})> _getImage(
-      String imagePath) async {
+    String imagePath,
+  ) async {
     var data = await File(imagePath).readAsBytes();
     var image = await decodeImage(data);
     var width = image.width;
