@@ -1,45 +1,9 @@
+# veneraGo
 
-# 从上游[verera](https://github.com/venera-app/venera) 1.6.3分支开发
+## 项目介绍
+ [veneraGo](https://github.com/AXmishell/veneraGo)是从上游[verera](https://github.com/venera-app/venera) 1.6.3分支开发的 Flutter 漫画阅读器
 ## 功能增加：
 1. 增加了连续章节自动加载（不用再点击下一章了）
 2. 优化流畅度
 
-# veneraGo
-[![flutter](https://img.shields.io/badge/flutter-3.41.4-blue)](https://flutter.dev/)
-[![License](https://img.shields.io/github/license/AXmishell/veneraGo)](https://github.com/AXmishell/veneraGo/blob/master/LICENSE)
-[![stars](https://img.shields.io/github/stars/AXmishell/veneraGo?style=flat)](https://github.com/AXmishell/veneraGo/stargazers)
-
-[![Download](https://img.shields.io/github/v/release/AXmishell/veneraGo)](https://github.com/AXmishell/veneraGo/releases)
-[![AUR Version](https://img.shields.io/aur/version/venera-bin)](https://aur.archlinux.org/packages/venera-bin)
-[![F-Droid Version](https://img.shields.io/f-droid/v/com.github.wgh136.venera)](https://f-droid.org/packages/com.github.wgh136.venera/)
-
-A comic reader that support reading local and network comics.
-
-## Features
-- Read local comics
-- Use javascript to create comic sources
-- Read comics from network sources
-- Manage favorite comics
-- Download comics
-- View comments, tags, and other information of comics if the source supports
-- Login to comment, rate, and other operations if the source supports
-
-## Build from source
-1. Clone the repository
-2. Install flutter, see [flutter.dev](https://flutter.dev/docs/get-started/install)
-3. Install rust, see [rustup.rs](https://rustup.rs/)
-4. Build for your platform: e.g. `flutter build apk`
-
-## Create a new comic source
-See [Comic Source](doc/comic_source.md)
-
-## Thanks
-
-### Tags Translation
-[EhTagTranslation](https://github.com/EhTagTranslation/Database)
-
-The Chinese translation of the manga tags is from this project.
-
-## Headless Mode
-See [Headless Doc](doc/headless_doc.md)
 
