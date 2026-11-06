@@ -1,6 +1,8 @@
 
-# 从上游verera 1.6.3分支开发
-# 增加了连续章节自动加载（不用再点击下一章了），优化流畅
+# 从上游[verera](https://github.com/venera-app/venera) 1.6.3分支开发
+## 功能增加：
+1. 增加了连续章节自动加载（不用再点击下一章了）
+2. 优化流畅度
 
 # venera
 [![flutter](https://img.shields.io/badge/flutter-3.41.4-blue)](https://flutter.dev/)
